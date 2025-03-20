@@ -23,7 +23,7 @@ router.post('/users', authMiddleware(['admin']), adminController.postCreateUser)
 router.post('/users/:userId/revoke', authMiddleware(['admin']), adminController.postRevokeUserAccess); // <--- ADD THIS LINE: Route for revoking user access
 router.post('/users/:userId/extend-validity', authMiddleware(['admin']), adminController.postExtendUserValidity); // <--- ADD THIS LINE: Route for extending user validity
 router.get('/users', authMiddleware(['admin']), adminController.getUsers); // <--- ADD THIS LINE: Route for getting a list of users
-
+router.post('/users/:userId/grant', authMiddleware(['admin']), adminController.postGrantUserAccess);
 
 
 module.exports = router; // Export the router

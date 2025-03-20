@@ -5,6 +5,12 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const connectDB = require('./config/db.config');
 const authRoutes = require('./routes/auth.routes');
+const rateLimit = require('express-rate-limit');
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+})
 
 const app = express();
 const port = process.env.PORT || 5000;

@@ -78,6 +78,12 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
+        // Check if user is active
+        if (!user.isActive) {
+            console.log('Inactive user login attempt:', email);
+            return res.status(401).json({ message: 'Your account is inactive. Please contact the administrator.' });
+        }
+
         // Verify password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {

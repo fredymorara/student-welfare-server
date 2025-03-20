@@ -94,8 +94,11 @@ const campaignSchema = new mongoose.Schema({
     disbursementAmount: {
         type: Number, // Amount disbursed (can be less than or equal to currentAmount)
     },
-});
+}, { timestamps: true });
 
+campaignSchema.index({ status: 1 });
+campaignSchema.index({ createdBy: 1 });
+campaignSchema.index({ beneficiary: 1 });
 // Create the Campaign model from the schema
 const Campaign = mongoose.model('Campaign', campaignSchema);
 

@@ -20,11 +20,18 @@ const userSchema = new mongoose.Schema({
         unique: true,
         trim: true,
         lowercase: true,
+        match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     },
     password: {
         type: String,
         required: true,
-        minlength: 6,
+        minlength: 8,
+        validate: {
+            validator: function (v) {
+                return /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*]).{8,}$/.test(v);
+            },
+            message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+        },
     },
     role: {
         type: String,
@@ -49,7 +56,7 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
-});
+}, { timestamps: true });
 
 
 const User = mongoose.model('User', userSchema);

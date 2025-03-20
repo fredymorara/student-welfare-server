@@ -1,6 +1,8 @@
 // controllers/member.controller.js
 const User = require('../models/user.model'); // Import User model
 const Campaign = require('../models/campaign.model');
+const Inquiry = require('../models/inquiry.model'); // Add import
+const Contribution = require('../models/contribution.model'); // Add this line
 
 exports.getCampaigns = async (req, res) => {
     try {
@@ -26,12 +28,6 @@ exports.getContributionHistory = async (req, res) => {
     }
 };
 
-exports.postContribute = (req, res) => {
-    const { campaignId, amount } = req.body;
-    console.log(`Contribution received for campaign ${campaignId}, amount: ${amount}`);
-    res.json({ message: 'Contribution processed successfully (dummy)' });
-};
-
 exports.getMemberProfile = async (req, res) => {
     try {
         console.log("Fetching member profile from MongoDB...");
@@ -47,8 +43,29 @@ exports.getMemberProfile = async (req, res) => {
     }
 };
 
-exports.postHelpInquiry = (req, res) => {
-    const { name, email, subject, message } = req.body;
-    console.log(`Help inquiry received from ${name} <${email}>, subject: ${subject}`);
-    res.json({ message: 'Help inquiry submitted successfully (dummy)' });
+exports.postHelpInquiry = async (req, res) => {
+    try {
+        const { name, email, subject, message } = req.body;
+        const inquiry = new Inquiry({ name, email, subject, message });
+        await inquiry.save();
+        res.json({ message: 'Help inquiry submitted successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to submit inquiry', error: error.message });
+    }
+};
+
+exports.postContribute = async (req, res) => {
+    try {
+        const { campaignId, amount } = req.body;
+        const contribution = new Contribution({
+            amount,
+            campaign: campaignId,
+            contributor: req.user._id,
+        });
+        await contribution.save();
+        await Campaign.findByIdAndUpdate(campaignId, { $inc: { currentAmount: amount } });
+        res.json({ message: 'Contribution processed successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Contribution failed', error: error.message });
+    }
 };

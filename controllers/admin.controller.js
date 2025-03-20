@@ -2,6 +2,8 @@
 const Campaign = require('../models/campaign.model'); // Import Campaign model
 const User = require('../models/user.model'); // Import User model (for dashboard metrics - member count)
 const bcrypt = require('bcryptjs'); // Import bcrypt for password hashing (install if you haven't
+const { parse } = require('json2csv');
+const Contribution = require('../models/contribution.model');
 
 exports.getCampaigns = async (req, res) => {
     try {
@@ -309,28 +311,110 @@ exports.getCampaignListForReports = (req, res) => {
     res.json(dummyCampaignList);
 };
 
-exports.getGeneralContributionsReport = (req, res) => {
-    // Placeholder - In real implementation, generate and return general contributions report
-    res.json({ reportData: 'General Contributions Report Data (dummy)' });
+exports.getGeneralContributionsReport = async (req, res) => {
+    try {
+        const { startDate, endDate, format } = req.query;
+        console.log("Generating General Contributions Report...", { startDate, endDate, format });
+
+        let filter = {};
+        if (startDate && endDate) {
+            filter.paymentDate = {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate),
+            };
+        }
+
+        const contributions = await Contribution.find(filter)
+            .populate('contributor', 'fullName email admissionNumber')
+            .populate('campaign', 'title trackingNumber');
+
+        if (format === 'csv') {
+            if (contributions.length === 0) {
+                return res.status(200).send("No contributions to report."); // Or handle empty report differently
+            }
+            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title', 'campaign.trackingNumber']; // Define fields for CSV
+            const csvOptions = { fields: csvFields };
+            const csvData = parse(contributions, csvOptions);
+
+            res.header('Content-Type', 'text/csv');
+            res.attachment('general-contributions-report.csv');
+            return res.send(csvData);
+        } else if (format === 'pdf') {
+            // For PDF generation, you'd typically use a library like 'pdfmake' or 'html-pdf-node'
+            // This is more complex and beyond the scope of this step. For now, just return JSON or CSV.
+            return res.status(400).json({ message: 'PDF format not yet implemented for general report.' });
+        } else {
+            return res.status(400).json({ message: 'Invalid report format requested.' });
+        }
+
+    } catch (error) {
+        console.error("Error generating general contributions report:", error);
+        res.status(500).json({ message: 'Error generating general contributions report', error: error.message });
+    }
 };
 
-exports.getCampaignSpecificReport = (req, res) => {
-    // Placeholder - In real implementation, generate and return campaign-specific report
-    res.json({ reportData: 'Campaign Specific Report Data (dummy)' });
+exports.getCampaignSpecificReport = async (req, res) => {
+    try {
+        const { campaignId, startDate, endDate, format } = req.query;
+        console.log("Generating Campaign Specific Report...", { campaignId, startDate, endDate, format });
+
+        if (!campaignId) {
+            return res.status(400).json({ message: 'Campaign ID is required for campaign-specific report.' });
+        }
+
+        let filter = { campaign: campaignId }; // Filter by campaignId
+        if (startDate && endDate) {
+            filter.paymentDate = {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate),
+            };
+        }
+
+        const contributions = await Contribution.find(filter)
+            .populate('contributor', 'fullName email admissionNumber')
+            .populate('campaign', 'title trackingNumber');
+
+        if (format === 'csv') {
+            if (contributions.length === 0) {
+                return res.status(200).send("No contributions for this campaign to report.");
+            }
+            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title', 'campaign.trackingNumber'];
+            const csvOptions = { fields: csvFields };
+            const csvData = parse(contributions, csvOptions);
+
+            res.header('Content-Type', 'text/csv');
+            res.attachment(`campaign-${campaignId}-report.csv`);
+            return res.send(csvData);
+        } else if (format === 'pdf') {
+            return res.status(400).json({ message: 'PDF format not yet implemented for campaign-specific report.' });
+        } else {
+            return res.status(400).json({ message: 'Invalid report format requested.' });
+        }
+
+    } catch (error) {
+        console.error("Error generating campaign-specific report:", error);
+        res.status(500).json({ message: 'Error generating campaign-specific report', error: error.message });
+    }
 };
 
 exports.getAdminProfile = async (req, res) => {
     try {
-        // Placeholder: For now, we'll just send back a dummy admin profile
-        // In a real app, you would fetch the logged-in admin's profile from the database
-        // based on authentication (e.g., using JWT and req.user)
-        const dummyAdminProfile = {
-            fullName: 'Welfare Admin User', // Replace with actual admin name
-            email: 'admin@example.org',     // Replace with actual admin email
-            role: 'admin',
-            profilePicture: null,          // Replace with actual profile picture URL or data
-        };
-        res.json(dummyAdminProfile); // Send dummy profile data
+        // Access the authenticated user from req.user (set by authMiddleware)
+        const adminUser = req.user;
+
+        if (!adminUser) {
+            return res.status(404).json({ message: 'Admin user not found in request context.' }); // Should not happen if authMiddleware is correctly set up
+        }
+
+        // Fetch the admin user's profile from the database using their ID
+        const adminProfile = await User.findById(adminUser._id).select('-password'); // Exclude password for security
+
+        if (!adminProfile) {
+            return res.status(404).json({ message: 'Admin profile not found in database.' }); // Handle case where user might be deleted or corrupted
+        }
+
+        res.json(adminProfile); // Send the actual admin profile data
+
     } catch (error) {
         console.error("Error fetching admin profile:", error);
         res.status(500).json({ message: "Error fetching admin profile", error: error.message });
@@ -341,4 +425,18 @@ exports.postChangePassword = (req, res) => {
     const { currentPassword, newPassword } = req.body;
     console.log('Admin password change request received');
     res.json({ message: 'Admin password changed successfully (dummy)' });
+};
+
+exports.postGrantUserAccess = async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { isActive: true },
+            { new: true }
+        );
+        res.json({ message: 'User access granted', user });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to grant access', error: error.message });
+    }
 };
