@@ -64,25 +64,12 @@ contributionSchema.virtual('formattedAmount').get(function () {
 });
 
 // Pre-save hook to validate payment method specific fields
+// contribution.model.js - Update the pre-save hook
 contributionSchema.pre('save', function (next) {
-    switch (this.paymentMethod) {
-        case 'M-Pesa':
-            if (!this.mpesaCode) {
-                return next(new Error('M-Pesa transactions require mpesaCode'));
-            }
-            break;
-        case 'Bank Transfer':
-            if (!this.bankReference) {
-                return next(new Error('Bank transfers require bankReference'));
-            }
-            break;
-        case 'Card':
-            if (!this.cardLast4) {
-                return next(new Error('Card payments require cardLast4'));
-            }
-            break;
+    if (this.paymentMethod === 'M-Pesa' && this.isNew) {
+        this.mpesaCode = 'PENDING'; // Placeholder until callback
     }
-    next();
+    next(); // Remove validation checks here
 });
 
 const Contribution = mongoose.model('Contribution', contributionSchema);

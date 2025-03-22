@@ -4,6 +4,7 @@ const User = require('../models/user.model'); // Import User model (for dashboar
 const bcrypt = require('bcryptjs'); // Import bcrypt for password hashing (install if you haven't
 const { parse } = require('json2csv');
 const Contribution = require('../models/contribution.model');
+const mpesaService = require('../services/mpesa.service'); // Add this line
 
 exports.getCampaigns = async (req, res) => {
     try {
@@ -68,36 +69,46 @@ exports.postEndCampaign = async (req, res) => {
 exports.postCreateCampaign = async (req, res) => {
     console.log("postCreateCampaign controller function CALLED!");
 
-    // Log the entire request body to see what data is being received
-    console.log("Request Body:", req.body); // <-- ADD THIS LOG
-
     try {
-        const { title, description, details, category, goalAmount, endDate, trackingNumber } = req.body;
+        // Destructure required fields
+        const { title, description, category, goalAmount, endDate } = req.body;
 
+        // Validate required fields
+        if (!title || !description || !category || !goalAmount || !endDate) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        // Create campaign with admin user reference
         const newCampaign = new Campaign({
             title,
             description,
-            details,
             category,
             goalAmount,
             endDate,
-            trackingNumber,
-            // ... 
+            createdBy: req.user._id, // Add admin user reference
+            status: 'active' // Default status for admin-created campaigns
         });
-
-        // Log the newCampaign object *before* saving to DB - to inspect the Mongoose document
-        console.log("New Campaign Object (before save):", newCampaign); // <-- ADD THIS LOG
 
         const savedCampaign = await newCampaign.save();
 
-        // Log the savedCampaign object after successful save - to confirm save
-        console.log("Campaign saved successfully:", savedCampaign); // <-- ADD THIS LOG
+        res.status(201).json({
+            message: 'Campaign created successfully',
+            campaign: {
+                _id: savedCampaign._id,
+                title: savedCampaign.title,
+                status: savedCampaign.status,
+                goalAmount: savedCampaign.goalAmount,
+                endDate: savedCampaign.endDate
+            }
+        });
 
-        res.status(201).json({ message: 'Campaign created successfully', campaign: savedCampaign });
     } catch (error) {
-        // Log the *full error object* to see the detailed error information
-        console.error("Error in campaign creation:", error); // <-- Make sure you are logging the full 'error' object
-        res.status(400).json({ message: 'Campaign creation failed', error: error.message });
+        console.error("Campaign creation error:", error);
+        res.status(400).json({
+            message: 'Campaign creation failed',
+            error: error.message,
+            validationErrors: error.errors ? Object.values(error.errors).map(e => e.message) : []
+        });
     }
 };
 
@@ -151,45 +162,31 @@ exports.postRejectCampaign = async (req, res) => {
     }
 };
 
+// Update admin.controller.js
 exports.postDisburseFunds = async (req, res) => {
     const { campaignId } = req.params;
-    // Extract disbursement details from request body (you'll need to send these from Postman in the request body when testing)
-    const { disbursementMethod, disbursementDetails, disbursementAmount } = req.body;
+    const { phone, amount, ...disbursementDetails } = req.body;
 
     try {
+        // Initiate B2C payment
+        const result = await mpesaService.initiateB2CPayment(phone, amount, campaignId);
+
+        // Update campaign record
         const campaign = await Campaign.findByIdAndUpdate(
             campaignId,
             {
-                status: 'ended', // Update status to 'ended'
-                disbursementDate: Date.now(), // Record disbursement date as now
-                disbursementMethod: disbursementMethod, // Record disbursement method from request body
-                disbursementDetails: disbursementDetails, // Record disbursement details from request body
-                disbursementAmount: disbursementAmount, // Record disbursement amount from request body
-                // disbursementInitiatedBy: req.user.id, // Ideally, get Admin user ID from authenticated request (we'll add authentication later)
-                disbursementStatus: 'completed', // For now, assume disbursement is completed successfully 
+                status: 'ended',
+                disbursementDate: new Date(),
+                disbursementStatus: 'processing',
+                disbursementAmount: amount,
+                ...disbursementDetails
             },
-            { new: true, runValidators: true }
+            { new: true }
         );
 
-        if (!campaign) {
-            return res.status(404).json({ message: 'Campaign not found' });
-        }
-
-        // In a real application, you would also implement the actual fund disbursement process here
-        // (e.g., integrate with payment gateway, trigger actual payment, handle transaction confirmations, etc.)
-        console.log(`Funds disbursement recorded for campaign ID: ${campaignId}, Method: ${disbursementMethod}, Amount: ${disbursementAmount}`);
-
-        // Exclude beneficiary and other sensitive fields from response if needed for security/privacy
-        const campaignResponse = campaign.toObject();
-        // delete campaignResponse.beneficiary; // Example: Exclude beneficiary info from response
-
-        res.json({ message: 'Funds disbursement recorded successfully', campaign: campaignResponse });
-
+        res.json({ message: 'Disbursement initiated', transactionId: result.ConversationID, campaign });
     } catch (error) {
-        if (error.name === 'CastError' && error.kind === 'ObjectId') {
-            return res.status(400).json({ message: 'Invalid campaign ID format' });
-        }
-        res.status(400).json({ message: 'Failed to record funds disbursement', error: error.message }); // Use 400 for invalid request data
+        res.status(500).json({ message: 'Disbursement failed', error: error.message });
     }
 };
 

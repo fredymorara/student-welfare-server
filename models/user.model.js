@@ -56,6 +56,11 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    // Inside userSchema in user.model.js
+    schoolFaculty: {
+        type: String,
+        trim: true,
+    },
 }, { timestamps: true });
 
 

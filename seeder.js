@@ -1,110 +1,121 @@
 // seeder.js
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const Campaign = require('./models/campaign.model'); // Import Campaign model
-const User = require('./models/user.model'); // Import User model
-const connectDB = require('./config/db.config'); // Import database connection function
+const Campaign = require('./models/campaign.model');
+const User = require('./models/user.model');
+const connectDB = require('./config/db.config');
 
-// Sample Campaign Data
-const campaignsData = [
-    {
-        title: 'Medical Appeal for Student X',
-        description: 'Help Student X cover urgent medical expenses.',
-        details: 'Student X is facing a serious medical condition and needs financial assistance for treatment...',
-        category: 'Medical',
-        goalAmount: 200000,
-        currentAmount: 10000,
-        endDate: '2024-12-31',
-        status: 'active',
-        trackingNumber: 'CMP-SEED-001',
-    },
-    {
-        title: 'Emergency Fund for Hostel Fire Victims',
-        description: 'Support students affected by the recent hostel fire.',
-        details: 'A recent fire in the student hostel has left many students without their belongings and in need of urgent support...',
-        category: 'Emergency',
-        goalAmount: 500000,
-        currentAmount: 250000,
-        endDate: '2024-11-15',
-        status: 'active',
-        trackingNumber: 'CMP-SEED-002',
-    },
-    {
-        title: 'Laptop Fund for Needy Students',
-        description: 'Help provide laptops to students who cannot afford them.',
-        details: 'Many bright students lack access to laptops, hindering their studies. This campaign aims to bridge the digital divide...',
-        category: 'Academic',
-        goalAmount: 300000,
-        currentAmount: 50000,
-        endDate: '2024-10-31',
-        status: 'pending_approval', // Example of a pending campaign
-        trackingNumber: 'CMP-SEED-003',
-    },
-];
+// Generate 20 Campaigns
+const categories = ['Medical', 'Emergency', 'Academic', 'Emergency','Medical'];
+const statusOptions = ['active', 'active', 'active'];
+const campaignsData = [];
 
-// Sample User Data (Admin and Member)
+for (let i = 1; i <= 20; i++) {
+    campaignsData.push({
+        title: `Campaign ${i.toString().padStart(2, '0')} - ${categories[i % 5]}`,
+        description: `Support for ${categories[i % 5]} initiative.`,
+        details: `Detailed description for ${categories[i % 5]} campaign.`,
+        category: categories[i % 5],
+        goalAmount: Math.floor(Math.random() * 500000) + 100000,
+        currentAmount: 0,
+        endDate: new Date(
+            2024,
+            Math.floor(Math.random() * 12),
+            Math.floor(Math.random() * 28 + 1)
+        ),
+        status: statusOptions[Math.floor(Math.random() * 3)],
+        trackingNumber: `CMP-SEED-${i.toString().padStart(3, '0')}`,
+    });
+}
+
+// Generate 10 Members + 1 Admin
 const usersData = [
     {
         admissionNumber: 'ADMIN001',
         fullName: 'Welfare Admin',
         email: 'admin@kabarak.ac.ke',
-        password: 'adminpassword', // In real app, hash passwords!
+        password: 'adminpassword',
         role: 'admin',
         schoolFaculty: 'Admin Department',
     },
-    {
-        admissionNumber: 'MEMBER001',
-        fullName: 'Student Member One',
-        email: 'member1@kabarak.ac.ke',
-        password: 'memberpassword', // In real app, hash passwords!
-        role: 'member',
-        schoolFaculty: 'School of Engineering',
-    },
-    {
-        admissionNumber: 'MEMBER002',
-        fullName: 'Student Member Two',
-        email: 'member2@kabarak.ac.ke',
-        password: 'memberpassword', // In real app, hash passwords!
-        role: 'member',
-        schoolFaculty: 'School of Medicine',
-    },
 ];
+
+for (let i = 1; i <= 10; i++) {
+    usersData.push({
+        admissionNumber: `MEMBER${i.toString().padStart(3, '0')}`,
+        fullName: `Student Member ${i}`,
+        email: `member${i}@kabarak.ac.ke`,
+        password: 'memberpassword',
+        role: 'member',
+        schoolFaculty: `School of ${['Engineering', 'Medicine', 'Law', 'Business', 'Science'][i % 5]}`,
+    });
+}
 
 const importData = async () => {
     try {
-        await connectDB(); // Connect to database
-        await Campaign.deleteMany(); // Clear existing campaigns
-        await User.deleteMany(); // Clear existing users
+        await connectDB();
+        await Campaign.deleteMany();
+        await User.deleteMany();
 
-        // Hash passwords before inserting users
-        const hashedUsersData = await Promise.all(usersData.map(async user => {
+        const insertedCampaigns = await Campaign.insertMany(campaignsData);
+
+        const hashedUsers = await Promise.all(usersData.map(async (user) => {
             const hashedPassword = await bcrypt.hash(user.password, 10);
-            return { ...user, password: hashedPassword };
+            const contributions = [];
+
+            // Replace the contribution creation logic in seeder.js
+            if (user.role === 'member') {
+                const contributionCount = Math.floor(Math.random() * 5) + 1;
+                for (let i = 0; i < contributionCount; i++) {
+                    const campaign = insertedCampaigns[Math.floor(Math.random() * 20)];
+                    const amount = Math.floor(Math.random() * 15000) + 500;
+
+                    // Create Contribution document
+                    const contribution = new Contribution({
+                        amount,
+                        campaign: campaign._id,
+                        contributor: user._id, // Assuming user._id is available
+                        paymentMethod: 'M-Pesa',
+                        transactionId: `SEED-TXN-${campaign._id}-${Date.now()}-${i}`,
+                        status: 'completed',
+                        mpesaCode: `MPESA-${Date.now()}-${i}`
+                    });
+                    await contribution.save();
+
+                    campaign.currentAmount += amount;
+                    await campaign.save();
+                }
+            }
+
+            return {
+                ...user,
+                password: hashedPassword,
+                contributions
+            };
         }));
 
-        await Campaign.insertMany(campaignsData); // Insert sample campaigns
-        await User.insertMany(hashedUsersData); // Insert sample users (with hashed passwords)
+        await Promise.all(insertedCampaigns.map(campaign => campaign.save()));
+        await User.insertMany(hashedUsers);
 
         console.log('Data Imported!');
-        process.exit(); // Exit the process after successful import
+        process.exit();
     } catch (error) {
         console.error('Error with data import:', error);
-        process.exit(1); // Exit with error code
+        process.exit(1);
     }
 };
 
 const deleteData = async () => {
     try {
-        await connectDB(); // Connect to database
-        await Campaign.deleteMany(); // Delete all campaigns
-        await User.deleteMany(); // Delete all users
-
+        await connectDB();
+        await Campaign.deleteMany();
+        await User.deleteMany();
         console.log('Data Destroyed!');
-        process.exit(); // Exit after successful deletion
+        process.exit();
     } catch (error) {
         console.error('Error with data destruction:', error);
-        process.exit(1); // Exit with error code
+        process.exit(1);
     }
 };
 

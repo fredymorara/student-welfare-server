@@ -6,6 +6,7 @@ const cors = require('cors');
 const connectDB = require('./config/db.config');
 const authRoutes = require('./routes/auth.routes');
 const rateLimit = require('express-rate-limit');
+const contributionController = require('./controllers/contribution.controller'); // Import contribution controller
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -23,6 +24,9 @@ app.use(bodyParser.json());
 app.use('/auth', authRoutes);
 app.use('/member', require('./routes/member.routes'));
 app.use('/admin', require('./routes/admin.routes'));
+
+// M-Pesa callback route
+app.post('/api/mpesa-callback', contributionController.handlePaymentCallback);
 
 // Connect to MongoDB
 connectDB();

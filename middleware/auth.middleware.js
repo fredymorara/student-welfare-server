@@ -11,8 +11,9 @@ const authMiddleware = (allowedRoles) => {
             const user = await User.findOne({ _id: decoded._id });
 
             if (!user) throw new Error('User not found');
+            // Add more descriptive error messages
             if (!allowedRoles.includes(user.role)) {
-                throw new Error('Unauthorized access for this role');
+                throw new Error(`Role ${user.role} not authorized for this route`);
             }
 
             req.user = user;

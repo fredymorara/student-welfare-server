@@ -18,6 +18,7 @@ const campaignSchema = new mongoose.Schema({
         type: String,
         enum: ['Medical', 'Academic', 'Emergency', 'Other'], // Restrict to specific categories
         default: 'Other',
+        required: 'true',
     },
     goalAmount: {
         type: Number,
@@ -36,10 +37,11 @@ const campaignSchema = new mongoose.Schema({
         type: Date,
         required: true, // End date is required
     },
+    // Add enum validation for status field
     status: {
         type: String,
-        enum: ['pending_approval', 'active', 'ended', 'approved', 'rejected'], // Possible campaign statuses
-        default: 'pending_approval', // Default status is pending approval
+        enum: ['pending_approval', 'active', 'ended', 'rejected'], // Remove 'approved'
+        default: 'pending_approval',
     },
     trackingNumber: {
         type: String,
