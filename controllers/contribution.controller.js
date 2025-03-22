@@ -223,44 +223,43 @@ function validateMpesaSignature(body, signature) {
 
 exports.handlePaymentCallback = async (req, res) => {
     try {
-        console.log('Raw callback received:', JSON.stringify(req.body, null, 2));
-
-        // Temporarily disable validation for testing
-        // if (!validateMpesaSignature(req.body, req.headers['x-mpesa-signature'])) {
-        //   return res.status(401).json({ error: 'Invalid signature' });
-        // }
-
         const { Body: { stkCallback: callback } } = req.body;
         const checkoutRequestId = callback.CheckoutRequestID;
 
-        console.log(`Processing callback for CheckoutRequestID: ${checkoutRequestId}`);
+        // Find contribution using transactionId
+        const contribution = await Contribution.findOne({ transactionId: checkoutRequestId })
+            .populate('campaign contributor');
 
-        const contribution = await Contribution.findOne({ transactionId: checkoutRequestId });
         if (!contribution) {
-            console.error('Contribution not found:', checkoutRequestId);
             return res.status(404).json({ error: 'Contribution not found' });
         }
 
+        // Handle successful payment
         if (callback.ResultCode === '0') {
             const receipt = callback.CallbackMetadata.Item.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
-            contribution.status = 'completed';
-            contribution.mpesaCode = receipt || 'N/A';
+
+            await Contribution.findByIdAndUpdate(
+                contribution._id,
+                {
+                    status: 'completed',
+                    mpesaCode: receipt
+                }
+            );
 
             await Campaign.findByIdAndUpdate(
-                contribution.campaign,
+                contribution.campaign._id,
                 { $inc: { currentAmount: contribution.amount } }
             );
-            console.log(`Campaign ${contribution.campaign} updated with ${contribution.amount}`);
         } else {
-            contribution.status = 'failed';
-            console.log('Payment failed with ResultCode:', callback.ResultCode);
+            await Contribution.findByIdAndUpdate(
+                contribution._id,
+                { status: 'failed' }
+            );
         }
 
-        await contribution.save();
-        console.log('Contribution status updated to:', contribution.status);
         res.status(200).send();
     } catch (error) {
-        console.error('Callback processing error:', error);
+        console.error('Callback error:', error);
         res.status(500).json({ error: error.message });
     }
 };

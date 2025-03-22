@@ -39,7 +39,8 @@ const contributionSchema = new mongoose.Schema({
     mpesaCode: { // For M-Pesa transactions
         type: String,
         unique: true,
-        sparse: true
+        sparse: true,
+        default: null,
     },
     bankReference: { // For bank transfers
         type: String,
@@ -61,15 +62,6 @@ contributionSchema.index({ transactionId: 1 }, { unique: true });
 // Virtual property for formatted amount
 contributionSchema.virtual('formattedAmount').get(function () {
     return `KES ${this.amount.toLocaleString()}`;
-});
-
-// Pre-save hook to validate payment method specific fields
-// contribution.model.js - Update the pre-save hook
-contributionSchema.pre('save', function (next) {
-    if (this.paymentMethod === 'M-Pesa' && this.isNew) {
-        this.mpesaCode = 'PENDING'; // Placeholder until callback
-    }
-    next(); // Remove validation checks here
 });
 
 const Contribution = mongoose.model('Contribution', contributionSchema);

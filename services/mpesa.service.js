@@ -16,36 +16,41 @@ exports.initiateSTKPush = async (phone, amount, campaignId, userId) => {
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
     const password = Buffer.from(`${process.env.MPESA_BUSINESS_SHORT_CODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
 
-    const response = await axios.post(
-        'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
-        {
-            BusinessShortCode: process.env.MPESA_BUSINESS_SHORT_CODE,
-            Password: password,
-            Timestamp: timestamp,
-            TransactionType: 'CustomerPayBillOnline',
-            Amount: amount,
-            PartyA: phone,
-            PartyB: process.env.MPESA_BUSINESS_SHORT_CODE,
-            PhoneNumber: phone,
-            CallBackURL: `${process.env.BASE_URL}/api/mpesa-callback`,
-            AccountReference: `CAMPAIGN-${campaignId}`,
-            TransactionDesc: `Contribution to campaign ${campaignId}`
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-    );
+    try {
+        const response = await axios.post(
+            'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+            {
+                BusinessShortCode: process.env.MPESA_BUSINESS_SHORT_CODE,
+                Password: password,
+                Timestamp: timestamp,
+                TransactionType: 'CustomerPayBillOnline',
+                Amount: amount,
+                PartyA: phone,
+                PartyB: process.env.MPESA_BUSINESS_SHORT_CODE,
+                PhoneNumber: phone,
+                CallBackURL: `${process.env.BASE_URL}/api/mpesa-callback`,
+                AccountReference: `CAMPAIGN-${campaignId}`,
+                TransactionDesc: `Contribution to campaign ${campaignId}`
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
 
-    // Save contribution record
-    const contribution = new Contribution({
-        amount,
-        campaign: campaignId,
-        contributor: userId,
-        paymentMethod: 'M-Pesa',
-        status: 'pending',
-        transactionId: response.data.CheckoutRequestID
-    });
-    await contribution.save();
+        // Create contribution without explicit ObjectId conversion
+        const contribution = new Contribution({
+            amount: Number(amount),
+            campaign: campaignId, // Mongoose will handle the conversion
+            contributor: userId, // Mongoose will handle the conversion
+            paymentMethod: 'M-Pesa',
+            status: 'pending',
+            transactionId: response.data.CheckoutRequestID
+        });
 
-    return response.data;
+        await contribution.save();
+        return response.data;
+    } catch (error) {
+        console.error('M-Pesa initiation error:', error);
+        throw new Error(error.response?.data?.errorMessage || error.message || 'Payment initiation failed');
+    }
 };
 
 exports.initiateB2CPayment = async (phone, amount, campaignId) => {
