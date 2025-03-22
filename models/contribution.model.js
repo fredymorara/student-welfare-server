@@ -38,7 +38,6 @@ const contributionSchema = new mongoose.Schema({
     },
     mpesaCode: { // For M-Pesa transactions
         type: String,
-        unique: true,
         sparse: true,
         default: null,
     },
@@ -51,7 +50,8 @@ const contributionSchema = new mongoose.Schema({
         sparse: true
     }
 }, {
-    timestamps: true // Adds createdAt and updatedAt automatically
+    timestamps: true, // Adds createdAt and updatedAt automatically
+    autoIndex: false
 });
 
 // Indexes for faster querying

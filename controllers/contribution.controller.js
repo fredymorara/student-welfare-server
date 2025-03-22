@@ -223,38 +223,47 @@ function validateMpesaSignature(body, signature) {
 
 exports.handlePaymentCallback = async (req, res) => {
     try {
-        const { Body: { stkCallback: callback } } = req.body;
+        console.log("M-Pesa Callback:", req.body);
+
+        // Handle nested callback structure
+        const callback = req.body.Body?.stkCallback || req.body;
+        if (!callback) {
+            return res.status(400).json({ error: 'Invalid callback format' });
+        }
+
         const checkoutRequestId = callback.CheckoutRequestID;
+        const resultCode = callback.ResultCode.toString(); // Ensure string comparison
 
         // Find contribution using transactionId
-        const contribution = await Contribution.findOne({ transactionId: checkoutRequestId })
-            .populate('campaign contributor');
+        const contribution = await Contribution.findOne({
+            transactionId: checkoutRequestId
+        }).populate('campaign');
 
         if (!contribution) {
+            console.error("Contribution not found:", checkoutRequestId);
             return res.status(404).json({ error: 'Contribution not found' });
         }
 
-        // Handle successful payment
-        if (callback.ResultCode === '0') {
-            const receipt = callback.CallbackMetadata.Item.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
+        if (resultCode === '0') {
+            // Extract M-Pesa receipt
+            const receipt = callback.CallbackMetadata?.Item?.find(
+                i => i.Name === 'MpesaReceiptNumber'
+            )?.Value;
 
-            await Contribution.findByIdAndUpdate(
-                contribution._id,
-                {
-                    status: 'completed',
-                    mpesaCode: receipt
-                }
-            );
+            // Update contribution
+            contribution.status = 'completed';
+            contribution.mpesaCode = receipt || 'N/A';
+            await contribution.save();
 
+            // Update campaign
             await Campaign.findByIdAndUpdate(
                 contribution.campaign._id,
-                { $inc: { currentAmount: contribution.amount } }
+                { $inc: { currentAmount: contribution.amount } },
+                { new: true }
             );
         } else {
-            await Contribution.findByIdAndUpdate(
-                contribution._id,
-                { status: 'failed' }
-            );
+            contribution.status = 'failed';
+            await contribution.save();
         }
 
         res.status(200).send();
