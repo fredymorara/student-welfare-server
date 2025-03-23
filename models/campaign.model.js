@@ -16,7 +16,7 @@ const campaignSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ['Medical', 'Academic', 'Emergency', 'Other'], // Restrict to specific categories
+        enum: ['Medical', 'Academic', 'Emergency', 'Other', 'Environmental', 'Sports', 'Education', 'Social Welfare'], // Restrict to specific categories
         default: 'Other',
         required: 'true',
     },

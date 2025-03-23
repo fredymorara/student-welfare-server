@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs'); // Import bcrypt for password hashing (insta
 const { parse } = require('json2csv');
 const Contribution = require('../models/contribution.model');
 const mpesaService = require('../services/mpesa.service'); // Add this line
+const mongoose = require('mongoose');
 
 exports.getCampaigns = async (req, res) => {
     try {
@@ -15,6 +16,55 @@ exports.getCampaigns = async (req, res) => {
     } catch (error) {
         console.error("Error fetching campaigns:", error); // Added log: Error
         res.status(500).json({ message: error.message });
+    }
+};
+
+exports.getCampaignContributors = async (req, res) => {
+    const { campaignId } = req.params;
+    try {
+        console.log(`Fetching contributors for campaign ID: ${campaignId}`);
+        const contributions = await Contribution.find({ campaign: campaignId })
+            .populate('contributor', 'fullName') // Populate contributor's full name
+            .distinct('contributor'); // Get distinct contributor IDs
+
+        const uniqueContributors = await User.find({ _id: { $in: contributions } }); // Fetch user details for distinct contributors
+
+        const formattedContributors = uniqueContributors.map(user => ({
+            memberName: user.fullName, // Or however you want to display member name
+            // You can add more fields if needed, e.g., user.email, user.admissionNumber
+        }));
+
+        console.log(`Found ${formattedContributors.length} contributors for campaign ID: ${campaignId}`);
+        res.json(formattedContributors);
+    } catch (error) {
+        console.error("Error fetching campaign contributors:", error);
+        res.status(500).json({ message: 'Failed to fetch campaign contributors', error: error.message });
+    }
+};
+
+exports.getCampaignContributionHistory = async (req, res) => {
+    const { campaignId } = req.params;
+    try {
+        console.log(`Fetching contribution history for campaign ID: ${campaignId}`);
+        const contributionHistory = await Contribution.find({ campaign: campaignId })
+            .populate('contributor', 'fullName') // Populate contributor's full name
+            .sort({ paymentDate: -1 }); // Sort by payment date, newest first
+
+        const formattedHistory = contributionHistory.map(contribution => ({
+            memberName: contribution.contributor ? contribution.contributor.fullName : 'Guest Contributor', // Handle cases where contributor might be null
+            amount: contribution.amount,
+            contributionDate: contribution.paymentDate,
+            transactionId: contribution.transactionId,
+            paymentMethod: contribution.paymentMethod, // Include payment method
+            status: contribution.status,           // Include payment status
+            // Add more fields as needed
+        }));
+
+        console.log(`Found ${formattedHistory.length} contribution records for campaign ID: ${campaignId}`);
+        res.json(formattedHistory);
+    } catch (error) {
+        console.error("Error fetching campaign contribution history:", error);
+        res.status(500).json({ message: 'Failed to fetch campaign contribution history', error: error.message });
     }
 };
 
@@ -279,24 +329,6 @@ exports.postExtendUserValidity = async (req, res) => {
         }
         res.status(400).json({ message: 'Failed to extend user validity', error: error.message }); // Respond with 400 for other validation errors or invalid date format
     }
-};
-
-exports.getCampaignContributors = (req, res) => {
-    const { campaignId } = req.params;
-    const dummyContributors = [
-        { memberName: 'Member One', amount: 1000, contributionDate: '2024-07-25' },
-        { memberName: 'Another Member', amount: 500, contributionDate: '2024-07-26' },
-    ];
-    res.json(dummyContributors);
-};
-
-exports.getCampaignContributionHistory = (req, res) => {
-    const { campaignId } = req.params;
-    const dummyHistory = [
-        { amount: 100, memberName: 'Member A', contributionDate: '2024-07-27', transactionId: 'TXN-001' },
-        { amount: 200, memberName: 'Member B', contributionDate: '2024-07-28', transactionId: 'TXN-002' },
-    ];
-    res.json(dummyHistory);
 };
 
 exports.getCampaignListForReports = (req, res) => {
