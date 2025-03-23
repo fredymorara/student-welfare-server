@@ -73,6 +73,37 @@ exports.getContributionHistory = async (req, res) => {
     }
 };
 
+exports.getMyContributionHistory = async (req, res) => {
+    try {
+        console.log("Fetching contribution history for member from MongoDB...");
+        const contributions = await Contribution.find({ contributor: req.user._id }) // Filter by logged-in user's ID
+            .populate('campaign', 'title category') // Populate campaign details
+            .sort({ paymentDate: -1 }); // Sort by payment date in descending order
+
+        console.log("Member contribution history fetched:", contributions);
+        res.json({ success: true, data: contributions });
+    } catch (error) {
+        console.error("Error fetching member contribution history:", error);
+        res.status(500).json({ success: false, message: 'Failed to fetch contribution history', error: error.message });
+    }
+};
+
+exports.getMyRecentActivity = async (req, res) => {
+    try {
+        console.log("Fetching recent activity for member from MongoDB...");
+        const recentContributions = await Contribution.find({ contributor: req.user._id }) // Filter by logged-in user's ID
+            .populate('campaign', 'title') // Populate campaign title only for brevity
+            .sort({ paymentDate: -1 }) // Sort by payment date, newest first
+            .limit(5); // Limit to the 5 most recent contributions
+
+        console.log("Member recent activity fetched:", recentContributions);
+        res.json({ success: true, data: recentContributions });
+    } catch (error) {
+        console.error("Error fetching member recent activity:", error);
+        res.status(500).json({ success: false, message: 'Failed to fetch recent activity', error: error.message });
+    }
+};
+
 exports.getMemberProfile = async (req, res) => {
     try {
         console.log("Fetching member profile from MongoDB...");
