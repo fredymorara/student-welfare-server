@@ -272,3 +272,17 @@ exports.handlePaymentCallback = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+exports.getContributionStatus = async (req, res) => {
+    const { transactionId } = req.params;
+    try {
+        const contribution = await Contribution.findOne({ transactionId });
+        if (!contribution) {
+            return res.status(404).json({ message: 'Contribution not found' });
+        }
+        res.json({ status: contribution.status }); // Respond with just the status
+    } catch (error) {
+        console.error('Error fetching contribution status:', error);
+        res.status(500).json({ message: 'Error fetching contribution status', error: error.message });
+    }
+};

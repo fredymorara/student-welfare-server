@@ -27,7 +27,7 @@ app.use('/admin', require('./routes/admin.routes'));
 
 // M-Pesa callback route
 app.post('/api/mpesa-callback', contributionController.handlePaymentCallback);
-
+app.get('/contributions/status/:transactionId', contributionController.getContributionStatus);
 // Connect to MongoDB
 connectDB();
 
