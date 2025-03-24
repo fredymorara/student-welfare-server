@@ -48,6 +48,18 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true,
     },
+    isVerified: { // New field for email verification status
+        type: Boolean,
+        default: false,
+    },
+    // In user.model.js
+    verificationToken: {
+        type: String,
+        index: {
+            unique: true,
+            partialFilterExpression: { verificationToken: { $type: 'string' } }
+        }
+    },
     createdAt: {
         type: Date,
         default: Date.now,

@@ -2,6 +2,17 @@
 const User = require('../models/user.model');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer'); // Import nodemailer
+const crypto = require('crypto'); // Import crypto for token generation
+
+// Nodemailer transporter setup (configure your email service)
+const transporter = nodemailer.createTransport({
+    service: 'Gmail', // Or your email service
+    auth: {
+        user: process.env.EMAIL_USER, // Your email address
+        pass: process.env.EMAIL_PASS, // Your email password or app password
+    },
+});
 
 exports.register = async (req, res) => {
     try {
@@ -25,33 +36,55 @@ exports.register = async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user with normalized email
+        // Generate verification token
+        const verificationToken = crypto.randomBytes(20)
+            .toString('hex')
+            .replace(/[^a-f0-9]/g, '');
+        console.log('Generated Token:', verificationToken);
+
+        // Create user with normalized email and verification token
         const user = new User({
             email: email.toLowerCase(),
             password: hashedPassword,
             fullName,
             admissionNumber,
             role,
+            verificationToken: verificationToken, // Store verification token
+            isVerified: false, // Initially not verified
         });
 
         // Save user
         await user.save();
+        console.log('Stored Token:', user.verificationToken);
 
-        // Create safe user object for response
+        // Send verification email
+        // In registration handler
+        const verificationUrl = `${process.env.FRONTEND_URL}/auth/verify-email/${verificationToken}`;
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'KABU Welfare Admin says Hi!',
+            html: `<p>Please verify your email address by clicking on the following link: <a href="${verificationUrl}">${verificationUrl}</a></p>`,
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error('Email sending error:', error);
+                // Optionally handle email sending failure more gracefully (e.g., log error, but still return success to user)
+            } else {
+                console.log('Verification email sent:', info.response);
+            }
+        });
+
+
+        // Create safe user object for response (exclude sensitive data)
         const userResponse = user.toObject();
         delete userResponse.password;
-
-        // Generate token with role claim
-        const token = jwt.sign(
-            { _id: user._id, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' }
-        );
+        delete userResponse.verificationToken; // Don't send verification token to frontend
 
         res.status(201).json({
-            message: 'User registered successfully',
+            message: 'Registration successful! Please check your email to verify your account.', // Updated message
             user: userResponse,
-            token
         });
 
     } catch (error) {
@@ -78,6 +111,15 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
+        console.log("User found during login:", user); // ADD LOG - Log user object found for login
+
+        // Check if user is verified
+        if (!user.isVerified) {
+            console.log("User is not verified:", email); // ADD LOG
+            return res.status(401).json({ message: 'Please verify your email address before logging in.' }); // New check
+        }
+
+
         // Check if user is active
         if (!user.isActive) {
             console.log('Inactive user login attempt:', email);
@@ -94,6 +136,7 @@ exports.login = async (req, res) => {
         // Create safe user object
         const userResponse = user.toObject();
         delete userResponse.password;
+        delete userResponse.verificationToken; // Don't send verification token to frontend
 
         // Generate token with role
         const token = jwt.sign(
@@ -114,5 +157,36 @@ exports.login = async (req, res) => {
             message: 'Login failed',
             error: error.message
         });
+    }
+};
+
+exports.verifyEmail = async (req, res) => {
+    const { token } = req.params;
+    try {
+        const user = await User.findOne({ verificationToken: token }).select('+verificationToken');
+
+        if (!user) {
+            console.log(`Token Search: ${token}`);
+            const allTokens = await User.find({}).select('verificationToken');
+            console.log('Existing Tokens:', allTokens);
+            return res.status(400).json({ message: 'Invalid token' });
+        }
+
+        // Debug output
+        console.log('Found User:', {
+            _id: user._id,
+            storedToken: user.verificationToken,
+            inputToken: token,
+            match: user.verificationToken === token
+        });
+
+        user.isVerified = true;
+        user.verificationToken = undefined;
+        await user.save();
+
+        res.json({ message: 'Verification successful' });
+    } catch (error) {
+        console.error('Verification Error:', error);
+        res.status(500).json({ message: 'Verification failed' });
     }
 };
