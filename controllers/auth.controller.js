@@ -63,7 +63,7 @@ exports.register = async (req, res) => {
         const mailOptions = {
             from: process.env.EMAIL_USER,
             to: email,
-            subject: 'KABU Welfare Admin says Hi!',
+            subject: 'Verify Your Email Address - KABU Welfare System',
             html: `<p>Please verify your email address by clicking on the following link: <a href="${verificationUrl}">${verificationUrl}</a></p>`,
         };
 
@@ -188,5 +188,55 @@ exports.verifyEmail = async (req, res) => {
     } catch (error) {
         console.error('Verification Error:', error);
         res.status(500).json({ message: 'Verification failed' });
+    }
+};
+
+exports.resendVerificationEmail = async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ message: 'Email is required to resend verification.' });
+    }
+
+    try {
+        const user = await User.findOne({ email: email.toLowerCase() });
+        if (!user) {
+            return res.status(404).json({ message: 'User with this email not found.' });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({ message: 'This account is already verified.' });
+        }
+
+        // Generate a new verification token
+        const verificationToken = crypto.randomBytes(20)
+            .toString('hex')
+            .replace(/[^a-f0-9]/g, '');
+        user.verificationToken = verificationToken;
+        await user.save();
+
+        // Send verification email (re-use your email sending logic from register)
+        const verificationUrl = `${process.env.FRONTEND_URL}/auth/verify-email/${verificationToken}`;
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Verify Your Email Address - KABU Welfare System',
+            html: `<p>Please verify your email address by clicking on the following link: <a href="${verificationUrl}">${verificationUrl}</a></p>`,
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error('Email resending error:', error);
+                return res.status(500).json({ message: 'Failed to resend verification email due to server error.' });
+            } else {
+                console.log('Verification email resent:', info.response);
+                return res.json({ message: 'Verification email resent successfully. Please check your inbox.' });
+            }
+        });
+
+
+    } catch (error) {
+        console.error('Resend verification email error:', error);
+        res.status(500).json({ message: 'Failed to resend verification email.', error: error.message });
     }
 };

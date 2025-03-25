@@ -19,6 +19,9 @@ router.get('/verify-email/:token', (req, res, next) => {
     next();
 }, authController.verifyEmail); // New route for email verification
 
+// Resend verification email route
+router.post('/resend-verification-email', authController.resendVerificationEmail);
+
 
 router.use((err, req, res, next) => {
     console.error(err.stack);
