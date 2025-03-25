@@ -28,6 +28,6 @@ router.use((err, req, res, next) => {
     res.status(500).json({ message: 'Something went wrong!' });
 });
 
-
+router.get('/validate-token', authController.validateToken);
 
 module.exports = router;

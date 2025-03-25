@@ -240,3 +240,19 @@ exports.resendVerificationEmail = async (req, res) => {
         res.status(500).json({ message: 'Failed to resend verification email.', error: error.message });
     }
 };
+
+exports.validateToken = async (req, res) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+        return res.status(401).json({ valid: false, message: 'No token provided' });
+    }
+
+    try {
+        jwt.verify(token, process.env.JWT_SECRET); // Just verify, no need to decode fully here
+        res.status(200).json({ valid: true });
+    } catch (error) {
+        console.error('Token validation error:', error);
+        res.status(401).json({ valid: false, message: 'Invalid token' });
+    }
+};
