@@ -80,6 +80,8 @@ const usersData = [
         password: 'adminpassword',
         role: 'admin',
         schoolFaculty: 'Admin Department',
+        isVerified: true, // Add this line
+        verificationToken: undefined, // Add this line
     },
 ];
 
@@ -91,6 +93,8 @@ for (let i = 1; i <= 10; i++) {
         password: 'memberpassword',
         role: 'member',
         schoolFaculty: `School of ${['Engineering', 'Medicine', 'Law', 'Business', 'Science'][i % 5]}`,
+        isVerified: true, // Add this line
+        verificationToken: undefined, // Add this line
     });
 }
 
@@ -104,6 +108,8 @@ for (let i = 1; i <= 3; i++) {
         password: 'newuserpassword',
         role: 'member',
         schoolFaculty: `Faculty of Arts and Humanities`, // Example faculty
+        isVerified: true, // Add this line
+        verificationToken: undefined, // Add this line
     });
 }
 
