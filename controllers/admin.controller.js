@@ -450,10 +450,49 @@ exports.getAdminProfile = async (req, res) => {
     }
 };
 
-exports.postChangePassword = (req, res) => {
+exports.postChangePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
-    console.log('Admin password change request received');
-    res.json({ message: 'Admin password changed successfully (dummy)' });
+    const userId = req.user._id; // Admin changing their OWN password
+
+    // Basic validation
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Current and new passwords are required.' });
+    }
+
+    // Add more robust validation for new password complexity if needed here
+    if (newPassword.length < 8) {
+        return res.status(400).json({ message: 'New password must be at least 8 characters long.' });
+    }
+    // You could add regex checks here too
+
+    try {
+        // Fetch admin user WITH password field
+        const user = await User.findById(userId).select('+password'); // Use .select('+password') if excluded by default
+
+        if (!user) {
+            // This case should ideally not happen if authMiddleware is working
+            return res.status(404).json({ message: 'Admin user not found.' });
+        }
+
+        // Verify current password
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Incorrect current password.' });
+        }
+
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(newPassword, salt);
+
+        // Save the updated user
+        await user.save();
+
+        res.json({ message: 'Admin password changed successfully.' });
+
+    } catch (error) {
+        console.error('Admin password change error:', error);
+        res.status(500).json({ message: 'Failed to change password.', error: error.message });
+    }
 };
 
 exports.postGrantUserAccess = async (req, res) => {

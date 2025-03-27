@@ -19,5 +19,6 @@ router.post('/campaigns/apply', authMiddleware(['member']), memberController.pos
 router.post('/mpesa-payment', authMiddleware(['member']), memberController.initiateMpesaPayment);
 router.get('/my-contributions', authMiddleware(['member']), memberController.getMyContributionHistory);
 router.get('/my-recent-activity', authMiddleware(['member']), memberController.getMyRecentActivity);
+router.put('/profile/change-password', authMiddleware(['member']), memberController.changePassword);
 
 module.exports = router;
