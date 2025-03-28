@@ -16,9 +16,9 @@ const campaignSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ['Medical', 'Academic', 'Emergency', 'Other', 'Environmental', 'Sports', 'Education', 'Social Welfare'], // Restrict to specific categories
+        enum: ['Medical', 'Academic', 'Emergency', 'Other', 'Environmental', 'Sports', 'Education', 'Social Welfare'],
         default: 'Other',
-        required: 'true',
+        required: true, // Corrected 'true' to true
     },
     goalAmount: {
         type: Number,
@@ -40,8 +40,18 @@ const campaignSchema = new mongoose.Schema({
     // Add enum validation for status field
     status: {
         type: String,
-        enum: ['pending_approval', 'active', 'ended', 'rejected'], // Remove 'approved'
+        // UPDATED ENUM to include disbursement lifecycle
+        enum: [
+            'pending_approval', // Member applied
+            'active',           // Admin approved, collecting funds
+            'rejected',         // Admin rejected
+            'ended',            // Collection period finished (manually or by date/goal)
+            'disbursing',       // B2C initiated, waiting for callback
+            'disbursed',        // B2C successful callback received
+            'disbursement_failed' // B2C failed callback or timeout received
+        ],
         default: 'pending_approval',
+        index: true, // Added index for status
     },
     trackingNumber: {
         type: String,
@@ -51,9 +61,10 @@ const campaignSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User', // Reference to the User model (will be created later)
     },
-    createdBy: { // Track who created the campaign (Admin or Secretary - if you re-introduce Secretary role later)
+    createdBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', // Reference to the User model
+        ref: 'User',
+        index: true, // Added index
     },
     approvedBy: { // Track who approved the campaign (Admin)
         type: mongoose.Schema.Types.ObjectId,
@@ -70,38 +81,58 @@ const campaignSchema = new mongoose.Schema({
         type: Date,
         default: Date.now, // Timestamp when the campaign was last updated
     },
-    disbursementDate: {
-        type: Date, // Date when funds were disbursed
+    disbursementDetails: { // Admin entered remarks/details
+        type: String,
+        trim: true,
     },
-    disbursementMethod: {
-        type: String, // e.g., 'M-Pesa', 'Bank Transfer', 'Cash'
-        enum: ['M-Pesa', 'Bank Transfer', 'Cash', 'Other'], // Allowed disbursement methods
+    disbursementAmount: { // Amount actually disbursed (or attempted)
+        type: Number,
+        min: 0,
     },
-    disbursementDetails: {
-        type: String, // Additional details about the disbursement (e.g., M-Pesa transaction ID, bank details)
+    disbursementDate: { // Date disbursement was initiated by admin
+        type: Date,
     },
-    disbursementInitiatedBy: { // Track who initiated the disbursement (Admin)
+    disbursementMethod: { // Method used (should be M-Pesa B2C here)
+        type: String,
+        enum: ['M-Pesa B2C', 'Bank Transfer', 'Cash', 'Other'], // Added M-Pesa B2C
+    },
+    disbursementRecipientPhone: { // Target phone number for B2C
+        type: String,
+        trim: true,
+    },
+    disbursementRecipientName: { // Optional: Name of recipient
+        type: String,
+        trim: true,
+    },
+    disbursementInitiatedBy: { // Admin who initiated
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', // Reference to the User model (Admin user)
+        ref: 'User',
     },
-    disbursementApprovedBy: { // Optionally, track who approved the disbursement (Admin - if you want a separate approval step)
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', // Reference to the User model (Admin user)
+    disbursementTransactionID: { // M-Pesa ConversationID for B2C request
+        type: String,
+        index: true, // Index for looking up during callback
     },
-    disbursementStatus: {
-        type: String, // e.g., 'pending', 'processing', 'completed', 'failed'
-        enum: ['pending', 'processing', 'completed', 'failed'],
-        default: 'pending', // Initial status is pending
+    disbursementMpesaReceipt: { // Actual M-Pesa B2C transaction receipt from callback
+        type: String,
     },
-    disbursementAmount: {
-        type: Number, // Amount disbursed (can be less than or equal to currentAmount)
+    disbursementStatus: { // Tracks the B2C transaction progress specifically
+        type: String,
+        enum: ['pending', 'processing', 'completed', 'failed', 'timeout'],
+        // default: 'pending', // Set explicitly during initiation
+    },
+    disbursementResultCode: { // Result code from M-Pesa callback
+        type: String,
+    },
+    disbursementResultDesc: { // Result description from M-Pesa callback
+        type: String,
     },
 }, { timestamps: true });
 
 campaignSchema.index({ status: 1 });
 campaignSchema.index({ createdBy: 1 });
 campaignSchema.index({ beneficiary: 1 });
-// Create the Campaign model from the schema
+campaignSchema.index({ disbursementTransactionID: 1 });
+
 const Campaign = mongoose.model('Campaign', campaignSchema);
 
 module.exports = Campaign; // Export the Campaign model

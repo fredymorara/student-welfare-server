@@ -27,6 +27,14 @@ app.use('/admin', require('./routes/admin.routes'));
 
 // M-Pesa callback route
 app.post('/api/mpesa-callback', contributionController.handlePaymentCallback);
+app.post('/api/b2c-timeout', contributionController.handleB2CTimeout);
+app.post('/api/b2c-result', contributionController.handleB2CResult);
+
+app.use((err, req, res, next) => {
+    console.error("Unhandled Error:", err.stack);
+    res.status(500).send('Something broke!');
+})
+
 app.get('/contributions/status/:transactionId', contributionController.getContributionStatus);
 // Connect to MongoDB
 connectDB();
@@ -34,4 +42,8 @@ connectDB();
 // Start server
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
+    console.log(`Ensure M-Pesa callbacks point to: ${process.env.BASE_URL}`);
+    console.log(`   B2C Result URL: ${process.env.MPESA_B2C_RESULT_URL}`);
+    console.log(`   B2C Timeout URL: ${process.env.MPESA_B2C_TIMEOUT_URL}`);
+    console.log(`   STK Callback URL: ${process.env.BASE_URL}/api/mpesa-callback`);
 });

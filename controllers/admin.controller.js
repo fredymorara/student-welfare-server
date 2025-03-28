@@ -212,31 +212,113 @@ exports.postRejectCampaign = async (req, res) => {
     }
 };
 
-// Update admin.controller.js
-exports.postDisburseFunds = async (req, res) => {
+exports.initiateDisbursement = async (req, res) => {
     const { campaignId } = req.params;
-    const { phone, amount, ...disbursementDetails } = req.body;
+    // Extract recipientPhone, amount, recipientName (optional), remarks (optional) from body
+    const { recipientPhone, amount, recipientName, remarks } = req.body;
+    const adminUserId = req.user._id; // Admin initiating the request
+
+    console.log(`Initiating disbursement for Campaign ${campaignId}:`, { recipientPhone, amount, recipientName, remarks });
+
+    // Basic Input Validation
+    if (!recipientPhone || !amount) {
+        return res.status(400).json({ message: 'Recipient phone number and amount are required.' });
+    }
+    if (isNaN(amount) || Number(amount) <= 0) {
+        return res.status(400).json({ message: 'Invalid disbursement amount.' });
+    }
+
+    const session = await mongoose.startSession(); // Use transaction
+    session.startTransaction();
 
     try {
-        // Initiate B2C payment
-        const result = await mpesaService.initiateB2CPayment(phone, amount, campaignId);
+        // 1. Find the campaign
+        const campaign = await Campaign.findById(campaignId).session(session);
 
-        // Update campaign record
-        const campaign = await Campaign.findByIdAndUpdate(
-            campaignId,
-            {
-                status: 'ended',
-                disbursementDate: new Date(),
-                disbursementStatus: 'processing',
-                disbursementAmount: amount,
-                ...disbursementDetails
-            },
-            { new: true }
+        if (!campaign) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: 'Campaign not found.' });
+        }
+
+        // 2. Check Campaign Status and Funds
+        // Allow disbursement from 'active' or 'ended' status? Let's allow 'ended' for now.
+        if (campaign.status !== 'ended') {
+            // You might adjust this logic if partial disbursements from 'active' are allowed
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Campaign must be in 'ended' state to disburse. Current state: ${campaign.status}` });
+        }
+        if (Number(amount) > campaign.currentAmount) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Disbursement amount (${amount}) exceeds available funds (${campaign.currentAmount}).` });
+        }
+        // Prevent re-disbursing if already completed or in progress
+        if (['disbursing', 'disbursed'].includes(campaign.status) || campaign.disbursementStatus === 'processing' || campaign.disbursementStatus === 'completed') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Campaign funds are already being processed or have been disbursed. Status: ${campaign.status}, Disbursement Status: ${campaign.disbursementStatus}` });
+        }
+
+
+        // 3. Initiate B2C Payment via Service
+        console.log("Calling mpesaService.initiateB2CPayment...");
+        const mpesaResult = await mpesaService.initiateB2CPayment(
+            recipientPhone,
+            amount,
+            remarks || `Disbursement for ${campaign.title.substring(0, 50)}` // Use provided remarks or default
         );
 
-        res.json({ message: 'Disbursement initiated', transactionId: result.ConversationID, campaign });
+        // mpesaResult should contain { success: true, ConversationID, OriginatorConversationID, ResponseDescription }
+        console.log("Mpesa B2C Initiation Result:", mpesaResult);
+
+        // 4. Update Campaign Record (if initiation accepted by M-Pesa)
+        campaign.status = 'disbursing'; // Update main status
+        campaign.disbursementStatus = 'processing'; // Track B2C status
+        campaign.disbursementAmount = Number(amount);
+        campaign.disbursementDate = new Date();
+        campaign.disbursementMethod = 'M-Pesa B2C';
+        campaign.disbursementRecipientPhone = recipientPhone;
+        campaign.disbursementRecipientName = recipientName; // Store optional name
+        campaign.disbursementDetails = remarks; // Store optional remarks
+        campaign.disbursementInitiatedBy = adminUserId;
+        // Store the ConversationID received from M-Pesa to link the callback
+        campaign.disbursementTransactionID = mpesaResult.ConversationID;
+        campaign.disbursementResultCode = null; // Clear previous results if any
+        campaign.disbursementResultDesc = null;
+        campaign.disbursementMpesaReceipt = null;
+
+
+        // You *could* deduct the amount from currentAmount here, but it might be safer
+        // to wait for the 'completed' callback to be absolutely sure. Let's wait.
+        // campaign.currentAmount -= Number(amount); // Decide if you want to deduct now or on success callback
+
+        await campaign.save({ session });
+
+        // 5. Commit Transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        console.log(`Campaign ${campaignId} status updated to 'disbursing'. Waiting for M-Pesa callback.`);
+
+        // 6. Respond to Admin Frontend
+        res.status(200).json({
+            message: 'Disbursement initiated successfully. Waiting for M-Pesa confirmation.',
+            conversationId: mpesaResult.ConversationID, // Send back ID for reference
+            campaignStatus: campaign.status,
+            disbursementStatus: campaign.disbursementStatus
+        });
+
     } catch (error) {
-        res.status(500).json({ message: 'Disbursement failed', error: error.message });
+        await session.abortTransaction();
+        session.endSession();
+        console.error(`Error initiating disbursement for campaign ${campaignId}:`, error);
+        res.status(500).json({
+            message: 'Disbursement initiation failed.',
+            // Send back a more specific error if it's from M-Pesa service
+            error: error.message || 'Internal server error'
+        });
     }
 };
 
@@ -506,5 +588,116 @@ exports.postGrantUserAccess = async (req, res) => {
         res.json({ message: 'User access granted', user });
     } catch (error) {
         res.status(500).json({ message: 'Failed to grant access', error: error.message });
+    }
+};
+
+// --- REPLACE Existing postDisburseFunds ---
+exports.initiateDisbursement = async (req, res) => {
+    const { campaignId } = req.params;
+    // Extract recipientPhone, amount, recipientName (optional), remarks (optional) from body
+    const { recipientPhone, amount, recipientName, remarks } = req.body;
+    const adminUserId = req.user._id; // Admin initiating the request
+
+    console.log(`Initiating disbursement for Campaign ${campaignId}:`, { recipientPhone, amount, recipientName, remarks });
+
+    // Basic Input Validation
+    if (!recipientPhone || !amount) {
+        return res.status(400).json({ message: 'Recipient phone number and amount are required.' });
+    }
+    if (isNaN(amount) || Number(amount) <= 0) {
+        return res.status(400).json({ message: 'Invalid disbursement amount.' });
+    }
+
+    const session = await mongoose.startSession(); // Use transaction
+    session.startTransaction();
+
+    try {
+        // 1. Find the campaign
+        const campaign = await Campaign.findById(campaignId).session(session);
+
+        if (!campaign) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: 'Campaign not found.' });
+        }
+
+        // 2. Check Campaign Status and Funds
+        // Allow disbursement from 'active' or 'ended' status? Let's allow 'ended' for now.
+        if (campaign.status !== 'ended') {
+            // You might adjust this logic if partial disbursements from 'active' are allowed
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Campaign must be in 'ended' state to disburse. Current state: ${campaign.status}` });
+        }
+        if (Number(amount) > campaign.currentAmount) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Disbursement amount (${amount}) exceeds available funds (${campaign.currentAmount}).` });
+        }
+        // Prevent re-disbursing if already completed or in progress
+        if (['disbursing', 'disbursed'].includes(campaign.status) || campaign.disbursementStatus === 'processing' || campaign.disbursementStatus === 'completed') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: `Campaign funds are already being processed or have been disbursed. Status: ${campaign.status}, Disbursement Status: ${campaign.disbursementStatus}` });
+        }
+
+
+        // 3. Initiate B2C Payment via Service
+        console.log("Calling mpesaService.initiateB2CPayment...");
+        const mpesaResult = await mpesaService.initiateB2CPayment(
+            recipientPhone,
+            amount,
+            remarks || `Disbursement for ${campaign.title.substring(0, 50)}` // Use provided remarks or default
+        );
+
+        // mpesaResult should contain { success: true, ConversationID, OriginatorConversationID, ResponseDescription }
+        console.log("Mpesa B2C Initiation Result:", mpesaResult);
+
+        // 4. Update Campaign Record (if initiation accepted by M-Pesa)
+        campaign.status = 'disbursing'; // Update main status
+        campaign.disbursementStatus = 'processing'; // Track B2C status
+        campaign.disbursementAmount = Number(amount);
+        campaign.disbursementDate = new Date();
+        campaign.disbursementMethod = 'M-Pesa B2C';
+        campaign.disbursementRecipientPhone = recipientPhone;
+        campaign.disbursementRecipientName = recipientName; // Store optional name
+        campaign.disbursementDetails = remarks; // Store optional remarks
+        campaign.disbursementInitiatedBy = adminUserId;
+        // Store the ConversationID received from M-Pesa to link the callback
+        campaign.disbursementTransactionID = mpesaResult.ConversationID;
+        campaign.disbursementResultCode = null; // Clear previous results if any
+        campaign.disbursementResultDesc = null;
+        campaign.disbursementMpesaReceipt = null;
+
+
+        // You *could* deduct the amount from currentAmount here, but it might be safer
+        // to wait for the 'completed' callback to be absolutely sure. Let's wait.
+        // campaign.currentAmount -= Number(amount); // Decide if you want to deduct now or on success callback
+
+        await campaign.save({ session });
+
+        // 5. Commit Transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        console.log(`Campaign ${campaignId} status updated to 'disbursing'. Waiting for M-Pesa callback.`);
+
+        // 6. Respond to Admin Frontend
+        res.status(200).json({
+            message: 'Disbursement initiated successfully. Waiting for M-Pesa confirmation.',
+            conversationId: mpesaResult.ConversationID, // Send back ID for reference
+            campaignStatus: campaign.status,
+            disbursementStatus: campaign.disbursementStatus
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error(`Error initiating disbursement for campaign ${campaignId}:`, error);
+        res.status(500).json({
+            message: 'Disbursement initiation failed.',
+            // Send back a more specific error if it's from M-Pesa service
+            error: error.message || 'Internal server error'
+        });
     }
 };

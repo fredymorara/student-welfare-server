@@ -4,6 +4,7 @@ const Campaign = require('../models/campaign.model');
 const User = require('../models/user.model');
 const { validationResult } = require('express-validator');
 const crypto = require('crypto')
+const mongoose = require('mongoose');
 
 exports.createContribution = async (req, res) => {
     const session = await Contribution.startSession();
@@ -284,5 +285,153 @@ exports.getContributionStatus = async (req, res) => {
     } catch (error) {
         console.error('Error fetching contribution status:', error);
         res.status(500).json({ message: 'Error fetching contribution status', error: error.message });
+    }
+};
+
+exports.handleB2CResult = async (req, res) => {
+    console.log("--- B2C Result Callback Received ---");
+    console.log("Headers:", JSON.stringify(req.headers)); // Log headers (useful for debugging)
+    console.log("Body:", JSON.stringify(req.body));
+
+    // TODO: IMPLEMENT SIGNATURE VALIDATION HERE FOR PRODUCTION
+
+    const callbackData = req.body.Result;
+
+    if (!callbackData) {
+        console.error("Invalid B2C Result callback format: Missing 'Result' object.");
+        // Respond 200 OK to M-Pesa even on error to prevent retries
+        return res.status(200).json({ ResultCode: 1, ResultDesc: "Invalid format received" });
+    }
+
+    const conversationID = callbackData.ConversationID;
+    const originatorConversationID = callbackData.OriginatorConversationID; // Use if you sent one
+    const resultCode = callbackData.ResultCode.toString(); // Ensure string comparison
+    const resultDesc = callbackData.ResultDesc;
+    const transactionID = callbackData.TransactionID; // M-Pesa's receipt number
+
+    // Extract details from ResultParameters if needed (e.g., final amount, recipient)
+    let transactionAmount = null;
+    let mpesaReceiptNumber = null;
+    let recipientRegistered = null;
+
+    if (callbackData.ResultParameters && callbackData.ResultParameters.ResultParameter) {
+        const params = callbackData.ResultParameters.ResultParameter;
+        transactionAmount = params.find(p => p.Key === 'TransactionAmount')?.Value;
+        mpesaReceiptNumber = params.find(p => p.Key === 'TransactionReceipt')?.Value || transactionID; // Fallback to TransactionID
+        recipientRegistered = params.find(p => p.Key === 'RegisteredCustomerName')?.Value; // Useful info
+    }
+
+    console.log(`Processing B2C Result: ConvID=${conversationID}, Result=${resultCode}, Desc=${resultDesc}, MpesaReceipt=${mpesaReceiptNumber}`);
+
+
+    if (!conversationID) {
+        console.error("B2C Result callback missing ConversationID.");
+        return res.status(200).json({ ResultCode: 1, ResultDesc: "Missing ConversationID" });
+    }
+
+    // Use a try-catch for database operations
+    try {
+        // Find the campaign using the ConversationID stored during initiation
+        const campaign = await Campaign.findOne({ disbursementTransactionID: conversationID });
+
+        if (!campaign) {
+            console.error(`Campaign not found for ConversationID: ${conversationID}`);
+            // Still respond 200 OK to M-Pesa
+            return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted - Campaign not found locally" });
+        }
+
+        // Avoid processing callbacks multiple times for the same transaction
+        if (campaign.disbursementStatus === 'completed' || campaign.disbursementStatus === 'failed') {
+            console.warn(`Received duplicate B2C callback for already processed campaign ${campaign._id} (ConvID: ${conversationID}). Current Status: ${campaign.disbursementStatus}`);
+            return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted - Duplicate callback ignored" });
+        }
+
+
+        if (resultCode === '0') {
+            // SUCCESSFUL B2C Transaction
+            console.log(`B2C Success for Campaign ${campaign._id}.`);
+            campaign.status = 'disbursed'; // Update main status
+            campaign.disbursementStatus = 'completed';
+            campaign.disbursementResultCode = resultCode;
+            campaign.disbursementResultDesc = resultDesc;
+            campaign.disbursementMpesaReceipt = mpesaReceiptNumber || transactionID; // Store the M-Pesa receipt
+
+            // Optional: Adjust currentAmount if you didn't deduct during initiation
+            // campaign.currentAmount -= campaign.disbursementAmount; // Deduct only on success
+
+        } else {
+            // FAILED B2C Transaction
+            console.error(`B2C Failure for Campaign ${campaign._id}. ResultCode: ${resultCode}, Desc: ${resultDesc}`);
+            campaign.status = 'disbursement_failed'; // Update main status
+            campaign.disbursementStatus = 'failed';
+            campaign.disbursementResultCode = resultCode;
+            campaign.disbursementResultDesc = resultDesc;
+            // Do not store MpesaReceipt on failure
+        }
+
+        await campaign.save();
+        console.log(`Campaign ${campaign._id} updated successfully based on B2C callback.`);
+
+        // Respond 200 OK to M-Pesa to acknowledge receipt
+        res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
+
+    } catch (dbError) {
+        console.error(`Database error processing B2C Result callback for ConvID ${conversationID}:`, dbError);
+        // If DB fails, M-Pesa might retry. Respond with an error code (e.g., 1) might stop retries,
+        // but check Safaricom docs. Safest is usually 200 OK and handle internally.
+        res.status(200).json({ ResultCode: 1, ResultDesc: "Internal server error during processing" });
+    }
+};
+
+// --- NEW: B2C Timeout Callback Handler ---
+exports.handleB2CTimeout = async (req, res) => {
+    console.log("--- B2C Timeout Callback Received ---");
+    console.log("Headers:", JSON.stringify(req.headers));
+    console.log("Body:", JSON.stringify(req.body));
+
+    // Timeout payload is simpler, often just contains the ConversationID
+    // Check Safaricom docs for exact structure if needed, but usually it's minimal.
+    // Example: Might be inside a 'Result' object similar to success/fail, or directly in body. Adjust accordingly.
+
+    const callbackData = req.body.Result || req.body; // Adjust based on actual payload observed
+    const conversationID = callbackData.ConversationID || callbackData.OriginatorConversationID; // Try both
+
+    console.log(`Processing B2C Timeout: ConvID=${conversationID}`);
+
+    if (!conversationID) {
+        console.error("B2C Timeout callback missing ConversationID.");
+        return res.status(200).json({ ResultCode: 1, ResultDesc: "Missing ConversationID in timeout" });
+    }
+
+    // Use a try-catch for database operations
+    try {
+        // Find the campaign using the ConversationID
+        const campaign = await Campaign.findOne({ disbursementTransactionID: conversationID });
+
+        if (!campaign) {
+            console.error(`Campaign not found for Timeout ConversationID: ${conversationID}`);
+            return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted - Campaign not found locally (timeout)" });
+        }
+
+        // Only update if it's still 'processing' - avoid overwriting a success/fail that arrived earlier
+        if (campaign.disbursementStatus === 'processing') {
+            console.warn(`B2C Timeout received for Campaign ${campaign._id}. Setting status to failed.`);
+            campaign.status = 'disbursement_failed'; // Update main status
+            campaign.disbursementStatus = 'timeout'; // Specific timeout status
+            campaign.disbursementResultDesc = 'Transaction timed out waiting for response from M-Pesa.';
+
+            await campaign.save();
+            console.log(`Campaign ${campaign._id} updated to 'timeout' status.`);
+
+        } else {
+            console.warn(`Received Timeout callback for campaign ${campaign._id} (ConvID: ${conversationID}), but status is already '${campaign.disbursementStatus}'. Ignoring timeout.`);
+        }
+
+        // Respond 200 OK to M-Pesa
+        res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted (Timeout)" });
+
+    } catch (dbError) {
+        console.error(`Database error processing B2C Timeout callback for ConvID ${conversationID}:`, dbError);
+        res.status(200).json({ ResultCode: 1, ResultDesc: "Internal server error during timeout processing" });
     }
 };

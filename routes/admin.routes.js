@@ -9,7 +9,6 @@ router.get('/campaigns', authMiddleware(['admin']), adminController.getCampaigns
 router.post('/campaigns/:campaignId/end', authMiddleware(['admin']), adminController.postEndCampaign);
 router.post('/campaigns/:campaignId/approve', authMiddleware(['admin']), adminController.postApproveCampaign);
 router.post('/campaigns/:campaignId/reject', authMiddleware(['admin']), adminController.postRejectCampaign);
-router.post('/campaigns/:campaignId/disburse', authMiddleware(['admin']), adminController.postDisburseFunds);
 router.get('/campaign-contributors/:campaignId', authMiddleware(['admin']), adminController.getCampaignContributors);
 router.get('/campaign-contribution-history/:campaignId', authMiddleware(['admin']), adminController.getCampaignContributionHistory);
 router.get('/campaigns-list', authMiddleware(['admin']), adminController.getCampaignListForReports);
@@ -18,7 +17,8 @@ router.get('/reports/campaign-specific', authMiddleware(['admin']), adminControl
 router.get('/profile', authMiddleware(['admin']), adminController.getAdminProfile);
 router.post('/change-password', authMiddleware(['admin']), adminController.postChangePassword);
 
-// CORRECTED LINE (no trailing comment):
+// --- NEW Disbursement Initiation Route ---
+router.post('/campaigns/:campaignId/initiate-disbursement', authMiddleware(['admin']), adminController.initiateDisbursement);
 router.post('/campaigns', authMiddleware(['admin']), adminController.postCreateCampaign);
 
 router.post('/users', authMiddleware(['admin']), adminController.postCreateUser);
