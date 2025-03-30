@@ -245,23 +245,42 @@ exports.handlePaymentCallback = async (req, res) => {
             return res.status(404).json({ error: 'Contribution not found' });
         }
 
+        // Check if contribution is already processed (to prevent double-processing)
+        if (contribution.status === 'completed') {
+            console.log(`Contribution ${contribution._id} already processed. Ignoring duplicate callback.`);
+            return res.status(200).send(); // Return 200 OK to M-Pesa
+        }
+
         if (resultCode === '0') {
             // Extract M-Pesa receipt
             const receipt = callback.CallbackMetadata?.Item?.find(
                 i => i.Name === 'MpesaReceiptNumber'
             )?.Value;
 
-            // Update contribution
-            contribution.status = 'completed';
-            contribution.mpesaCode = receipt || 'N/A';
-            await contribution.save();
+            // Start a transaction for atomicity
+            const session = await mongoose.startSession();
+            session.startTransaction();
 
-            // Update campaign
-            await Campaign.findByIdAndUpdate(
-                contribution.campaign._id,
-                { $inc: { currentAmount: contribution.amount } },
-                { new: true }
-            );
+            try {
+                // Update contribution
+                contribution.status = 'completed';
+                contribution.mpesaCode = receipt || 'N/A';
+                await contribution.save({ session });
+
+                // Update campaign
+                const campaign = await Campaign.findById(contribution.campaign._id).session(session);
+                campaign.currentAmount += contribution.amount;
+                await campaign.save({ session });
+
+                // Commit transaction
+                await session.commitTransaction();
+                session.endSession();
+            } catch (error) {
+                // If anything fails, abort transaction
+                await session.abortTransaction();
+                session.endSession();
+                throw error;
+            }
         } else {
             contribution.status = 'failed';
             await contribution.save();
