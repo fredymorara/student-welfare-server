@@ -128,10 +128,7 @@ const campaignSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
-campaignSchema.index({ status: 1 });
-campaignSchema.index({ createdBy: 1 });
 campaignSchema.index({ beneficiary: 1 });
-campaignSchema.index({ disbursementTransactionID: 1 });
 
 const Campaign = mongoose.model('Campaign', campaignSchema);
 

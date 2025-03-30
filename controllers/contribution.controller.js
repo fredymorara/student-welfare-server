@@ -5,6 +5,8 @@ const User = require('../models/user.model');
 const { validationResult } = require('express-validator');
 const crypto = require('crypto')
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
+const { v4: uuidv4 } = require('uuid');
 
 exports.createContribution = async (req, res) => {
     const session = await Contribution.startSession();
@@ -223,122 +225,189 @@ function validateMpesaSignature(body, signature) {
 }
 
 exports.handlePaymentCallback = async (req, res) => {
-    try {
-        // Log the complete callback data for debugging
-        console.log("M-Pesa Callback Received:", JSON.stringify(req.body, null, 2));
+    const callbackId = uuidv4();
+    const session = await mongoose.startSession();
 
-        // Handle nested callback structure
+    console.log(`[CALLBACK][${callbackId}] Received payment callback`);
+    console.debug(`[CALLBACK][${callbackId}] Headers:`, req.headers);
+    console.debug(`[CALLBACK][${callbackId}] Body:`, req.body);
+
+    try {
+        session.startTransaction();
         const callback = req.body.Body?.stkCallback || req.body;
+
         if (!callback) {
-            console.error("Invalid callback format:", JSON.stringify(req.body));
+            console.warn(`[CALLBACK][${callbackId}] Invalid callback structure`);
             return res.status(400).json({ error: 'Invalid callback format' });
         }
 
         const checkoutRequestId = callback.CheckoutRequestID;
-        const resultCode = callback.ResultCode.toString(); // Ensure string comparison
+        const resultCode = callback.ResultCode?.toString();
 
-        console.log(`Processing M-Pesa callback for checkoutRequestId: ${checkoutRequestId}, resultCode: ${resultCode}`);
+        console.log(`[CALLBACK][${callbackId}] Processing ID: ${checkoutRequestId}, ResultCode: ${resultCode}`);
 
-        // Find contribution using transactionId
-        const contribution = await Contribution.findOne({
-            transactionId: checkoutRequestId
-        }).populate('campaign');
+        // Find contribution with locking
+        const contribution = await Contribution.findOne({ transactionId: checkoutRequestId })
+            .session(session)
+            .populate('campaign');
 
         if (!contribution) {
-            console.error(`Contribution not found for checkoutRequestId: ${checkoutRequestId}`);
+            console.error(`[CALLBACK][${callbackId}] No contribution found`);
+            await session.abortTransaction();
             return res.status(404).json({ error: 'Contribution not found' });
         }
 
-        console.log(`Found contribution: ${contribution._id}, current status: ${contribution.status}`);
+        console.log(`[CALLBACK][${callbackId}] Found contribution ${contribution._id}, current status: ${contribution.status}`);
+
+        // Check if already processed
+        if (['completed', 'failed'].includes(contribution.status)) {
+            console.warn(`[CALLBACK][${callbackId}] Already processed as ${contribution.status}`);
+            await session.abortTransaction();
+            return res.status(200).send();
+        }
 
         if (resultCode === '0') {
-            // Extract M-Pesa receipt
             const mpesaItems = callback.CallbackMetadata?.Item || [];
-            console.log("CallbackMetadata Items:", JSON.stringify(mpesaItems));
-
-            // Find the MpesaReceiptNumber item
             const receiptItem = mpesaItems.find(i => i.Name === 'MpesaReceiptNumber');
             const receipt = receiptItem?.Value;
 
-            console.log(`M-Pesa receipt number: ${receipt}`);
-
             if (!receipt) {
-                console.error("No MpesaReceiptNumber found in callback");
-                return res.status(400).json({ error: 'Missing M-Pesa receipt number' });
+                console.error(`[CALLBACK][${callbackId}] Missing receipt in successful transaction`);
+                await session.abortTransaction();
+                return res.status(400).json({ error: 'Missing receipt number' });
             }
 
-            // Check if this M-Pesa receipt has already been used
-            const existingContribution = await Contribution.findOne({
+            // Check for duplicate receipts
+            const existing = await Contribution.findOne({
                 mpesaCode: receipt,
                 status: 'completed'
-            });
+            }).session(session);
 
-            if (existingContribution) {
-                console.warn(`M-Pesa receipt ${receipt} already processed in contribution ${existingContribution._id}. Possible duplicate.`);
-                return res.status(200).send(); // Return 200 to M-Pesa but don't process again
-            }
-
-            // Start a transaction for atomicity
-            const session = await mongoose.startSession();
-            session.startTransaction();
-
-            try {
-                console.log(`Updating contribution ${contribution._id} to completed with receipt ${receipt}`);
-
-                // Update contribution
-                contribution.status = 'completed';
-                contribution.mpesaCode = receipt;
-                await contribution.save({ session });
-
-                // Update campaign
-                console.log(`Updating campaign ${contribution.campaign._id} currentAmount by adding ${contribution.amount}`);
-
-                const campaign = await Campaign.findById(contribution.campaign._id).session(session);
-                const previousAmount = campaign.currentAmount;
-                campaign.currentAmount += contribution.amount;
-
-                console.log(`Campaign ${campaign._id} amount: ${previousAmount} -> ${campaign.currentAmount}`);
-
-                await campaign.save({ session });
-
-                // Commit transaction
-                await session.commitTransaction();
-                session.endSession();
-
-                console.log(`Successfully processed payment for contribution ${contribution._id}`);
-            } catch (error) {
-                // If anything fails, abort transaction
-                console.error(`Transaction failed: ${error.message}`);
+            if (existing) {
+                console.warn(`[CALLBACK][${callbackId}] Duplicate receipt ${receipt} in ${existing._id}`);
                 await session.abortTransaction();
-                session.endSession();
-                throw error;
+                return res.status(200).send();
             }
+
+            // Process successful payment
+            console.log(`[CALLBACK][${callbackId}] Updating to completed with receipt ${receipt}`);
+            contribution.status = 'completed';
+            contribution.mpesaCode = receipt;
+
+            const campaign = await Campaign.findById(contribution.campaign._id).session(session);
+            console.log(`[CALLBACK][${callbackId}] Campaign pre-update: ${campaign.currentAmount}`);
+            campaign.currentAmount += contribution.amount;
+
+            await Promise.all([
+                contribution.save({ session }),
+                campaign.save({ session })
+            ]);
+
+            await session.commitTransaction();
+            console.log(`[CALLBACK][${callbackId}] Successfully processed`);
+
         } else {
-            console.log(`Setting contribution ${contribution._id} status to failed (resultCode: ${resultCode})`);
+            console.log(`[CALLBACK][${callbackId}] Marking as failed`);
             contribution.status = 'failed';
-            await contribution.save();
+            await contribution.save({ session });
+            await session.commitTransaction();
         }
 
         res.status(200).send();
+
     } catch (error) {
-        console.error('Callback error:', error.stack);
+        console.error(`[CALLBACK][${callbackId}] Processing failed:`, {
+            error: error.message,
+            stack: error.stack
+        });
+        await session.abortTransaction();
         res.status(500).json({ error: error.message });
+    } finally {
+        session.endSession();
+        console.log(`[CALLBACK][${callbackId}] Session closed`);
     }
 };
 
 exports.getContributionStatus = async (req, res) => {
     const { transactionId } = req.params;
+    const requestId = uuidv4();
+
+    logger.info('Status check initiated', {
+        requestId,
+        transactionId,
+        endpoint: '/contributions/status/:transactionId'
+    });
+    
     try {
         const contribution = await Contribution.findOne({ transactionId });
         if (!contribution) {
+            console.warn(`[STATUS][${requestId}] Contribution not found: ${transactionId}`);
             return res.status(404).json({ message: 'Contribution not found' });
         }
-        res.json({ status: contribution.status }); // Respond with just the status
+
+        console.log(`[STATUS][${requestId}] Current status: ${contribution.status}, Created: ${contribution.createdAt}`);
+
+        // Check if pending for more than 30 seconds
+        const ageMs = Date.now() - contribution.createdAt.getTime();
+        if (contribution.status === 'pending' && ageMs > 30000) {
+            console.log(`[STATUS][${requestId}] Triggering late verification (age: ${ageMs}ms)`);
+
+            try {
+                const statusResponse = await mpesaService.checkTransactionStatus(transactionId);
+                const session = await mongoose.startSession();
+                session.startTransaction();
+
+                console.log(`[STATUS][${requestId}] Transaction status result:`, statusResponse.ResultCode);
+
+                const updateOperations = [];
+
+                if (statusResponse.ResultCode === '0') {
+                    console.log(`[STATUS][${requestId}] Marking as completed`);
+                    contribution.status = 'completed';
+                    contribution.mpesaCode = statusResponse.MpesaReceiptNumber;
+
+                    const campaign = await Campaign.findById(contribution.campaign).session(session);
+                    console.log(`[STATUS][${requestId}] Campaign pre-update amount: ${campaign.currentAmount}`);
+                    campaign.currentAmount += contribution.amount;
+                    updateOperations.push(campaign.save({ session }));
+                } else {
+                    console.log(`[STATUS][${requestId}] Marking as failed`);
+                    contribution.status = 'failed';
+                }
+
+                updateOperations.push(contribution.save({ session }));
+                await Promise.all(updateOperations);
+                await session.commitTransaction();
+                console.log(`[STATUS][${requestId}] Database updates committed`);
+
+            } catch (statusError) {
+                console.error(`[STATUS][${requestId}] Status check failed:`, {
+                    error: statusError.message,
+                    stack: statusError.stack
+                });
+                // No throw - return current status
+            } finally {
+                session?.endSession();
+            }
+        }
+
+        const finalStatus = await Contribution.findById(contribution._id);
+        console.log(`[STATUS][${requestId}] Final status: ${finalStatus.status}`);
+        res.json({ status: finalStatus.status });
+
     } catch (error) {
-        console.error('Error fetching contribution status:', error);
-        res.status(500).json({ message: 'Error fetching contribution status', error: error.message });
+        console.error(`[STATUS][${requestId}] Critical error:`, {
+            error: error.message,
+            stack: error.stack
+        });
+        res.status(500).json({
+            message: 'Error fetching status',
+            requestId, // Include in response for debugging
+            error: error.message
+        });
     }
 };
+
 
 exports.handleB2CResult = async (req, res) => {
     console.log("--- B2C Result Callback Received ---");

@@ -7,6 +7,7 @@ const connectDB = require('./config/db.config');
 const authRoutes = require('./routes/auth.routes');
 const rateLimit = require('express-rate-limit');
 const contributionController = require('./controllers/contribution.controller'); // Import contribution controller
+const logger = require('./utils/logger');
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -51,9 +52,9 @@ connectDB();
 
 // Start server
 app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    logger.info(`Server is running on port ${port}`);
     console.log(`Ensure M-Pesa callbacks point to: ${process.env.BASE_URL}`);
     console.log(`   B2C Result URL: ${process.env.MPESA_B2C_RESULT_URL}`);
     console.log(`   B2C Timeout URL: ${process.env.MPESA_B2C_TIMEOUT_URL}`);
-    console.log(`   STK Callback URL: ${process.env.BASE_URL}/api/mpesa-callback`);
+    logger.info(`M-Pesa Callback URL: ${process.env.BASE_URL}/api/mpesa-callback`);
 });

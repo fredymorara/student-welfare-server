@@ -1,5 +1,6 @@
 const axios = require('axios');
 const Contribution = require('../models/contribution.model');
+const { v4: uuidv4 } = require('uuid');
 
 const MpesaEndpoints = {
     sandbox: {
@@ -178,5 +179,51 @@ exports.initiateB2CPayment = async (phone, amount, remarks = 'Campaign Disbursem
         // Extract specific M-Pesa error if available
         const errorMessage = error.response?.data?.errorMessage || error.message || 'B2C payment initiation failed';
         throw new Error(`B2C Error: ${errorMessage}`);
+    }
+};
+
+// mpesa.service.js
+exports.checkTransactionStatus = async (checkoutRequestId) => {
+    const token = await generateToken();
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
+    const password = Buffer.from(`${process.env.MPESA_BUSINESS_SHORT_CODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
+
+    const payload = {
+        BusinessShortCode: process.env.MPESA_BUSINESS_SHORT_CODE,
+        Password: password,
+        Timestamp: timestamp,
+        CheckoutRequestID: checkoutRequestId
+    };
+
+    console.log(`[MPESA][STATUS] Initiating status check for CheckoutRequestID: ${checkoutRequestId}`);
+    console.debug('[MPESA][STATUS] Request payload:', payload);
+
+    try {
+        const apiUrl = environment === 'production'
+            ? 'https://api.safaricom.co.ke/mpesa/transactionstatus/v1/query'
+            : 'https://sandbox.safaricom.co.ke/mpesa/transactionstatus/v1/query';
+
+        const response = await axios.get(apiUrl, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'X-Request-ID': uuidv4() // Add unique request ID
+            },
+            params: payload
+        });
+
+        console.log(`[MPESA][STATUS] Response for ${checkoutRequestId}:`, {
+            code: response.data.ResultCode,
+            description: response.data.ResultDesc
+        });
+        console.debug('[MPESA][STATUS] Full response:', response.data);
+
+        return response.data;
+    } catch (error) {
+        console.error('[MPESA][STATUS] API Error:', {
+            checkoutRequestId,
+            error: error.response ? error.response.data : error.message,
+            stack: error.stack
+        });
+        throw new Error('Failed to check transaction status');
     }
 };
