@@ -24,6 +24,16 @@ app.use(bodyParser.json());
 app.use('/auth', authRoutes);
 app.use('/member', require('./routes/member.routes'));
 app.use('/admin', require('./routes/admin.routes'));
+// Add this before your actual callback handler
+app.use('/api/mpesa-callback', (req, res, next) => {
+    console.log('RAW CALLBACK RECEIVED:', {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        query: req.query
+    });
+    next();
+});
 
 // M-Pesa callback route
 app.post('/api/mpesa-callback', contributionController.handlePaymentCallback);
