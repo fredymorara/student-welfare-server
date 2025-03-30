@@ -58,6 +58,7 @@ const contributionSchema = new mongoose.Schema({
 contributionSchema.index({ contributor: 1 });
 contributionSchema.index({ campaign: 1 });
 contributionSchema.index({ transactionId: 1 }, { unique: true });
+contributionSchema.index({ mpesaCode: 1 });
 
 // Virtual property for formatted amount
 contributionSchema.virtual('formattedAmount').get(function () {
