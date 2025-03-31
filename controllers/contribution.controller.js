@@ -7,6 +7,7 @@ const crypto = require('crypto')
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
+const mpesaService = require('../services/mpesa.service');
 
 exports.createContribution = async (req, res) => {
     const session = await Contribution.startSession();
@@ -337,7 +338,7 @@ exports.getContributionStatus = async (req, res) => {
         transactionId,
         endpoint: '/contributions/status/:transactionId'
     });
-    
+
     try {
         const contribution = await Contribution.findOne({ transactionId });
         if (!contribution) {
@@ -354,8 +355,8 @@ exports.getContributionStatus = async (req, res) => {
 
             try {
                 const statusResponse = await mpesaService.checkTransactionStatus(transactionId);
-                const session = await mongoose.startSession();
-                session.startTransaction();
+                const mongoSession = await mongoose.startSession();
+                mongoSession.startTransaction();
 
                 console.log(`[STATUS][${requestId}] Transaction status result:`, statusResponse.ResultCode);
 
@@ -366,18 +367,19 @@ exports.getContributionStatus = async (req, res) => {
                     contribution.status = 'completed';
                     contribution.mpesaCode = statusResponse.MpesaReceiptNumber;
 
-                    const campaign = await Campaign.findById(contribution.campaign).session(session);
+                    const campaign = await Campaign.findById(contribution.campaign).session(mongoSession);
                     console.log(`[STATUS][${requestId}] Campaign pre-update amount: ${campaign.currentAmount}`);
                     campaign.currentAmount += contribution.amount;
-                    updateOperations.push(campaign.save({ session }));
+                    updateOperations.push(campaign.save({ session: mongoSession }));
                 } else {
                     console.log(`[STATUS][${requestId}] Marking as failed`);
                     contribution.status = 'failed';
                 }
 
-                updateOperations.push(contribution.save({ session }));
+                updateOperations.push(contribution.save({ session: mongoSession }));
                 await Promise.all(updateOperations);
-                await session.commitTransaction();
+                await mongoSession.commitTransaction();
+                mongoSession.endSession();
                 console.log(`[STATUS][${requestId}] Database updates committed`);
 
             } catch (statusError) {
@@ -386,8 +388,6 @@ exports.getContributionStatus = async (req, res) => {
                     stack: statusError.stack
                 });
                 // No throw - return current status
-            } finally {
-                session?.endSession();
             }
         }
 
@@ -407,7 +407,6 @@ exports.getContributionStatus = async (req, res) => {
         });
     }
 };
-
 
 exports.handleB2CResult = async (req, res) => {
     console.log("--- B2C Result Callback Received ---");

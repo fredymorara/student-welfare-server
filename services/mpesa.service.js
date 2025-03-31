@@ -182,7 +182,6 @@ exports.initiateB2CPayment = async (phone, amount, remarks = 'Campaign Disbursem
     }
 };
 
-// mpesa.service.js
 exports.checkTransactionStatus = async (checkoutRequestId) => {
     const token = await generateToken();
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
@@ -200,15 +199,15 @@ exports.checkTransactionStatus = async (checkoutRequestId) => {
 
     try {
         const apiUrl = environment === 'production'
-            ? 'https://api.safaricom.co.ke/mpesa/transactionstatus/v1/query'
-            : 'https://sandbox.safaricom.co.ke/mpesa/transactionstatus/v1/query';
+            ? 'https://api.safaricom.co.ke/mpesa/stkpushquery/v1/query'
+            : 'https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query';
 
-        const response = await axios.get(apiUrl, {
+        const response = await axios.post(apiUrl, payload, {
             headers: {
-                Authorization: `Bearer ${token}`,
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
                 'X-Request-ID': uuidv4() // Add unique request ID
-            },
-            params: payload
+            }
         });
 
         console.log(`[MPESA][STATUS] Response for ${checkoutRequestId}:`, {
