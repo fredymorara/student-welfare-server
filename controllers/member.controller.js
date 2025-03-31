@@ -183,11 +183,12 @@ exports.updateMemberProfile = async (req, res) => {
 exports.postApplyForCampaign = async (req, res) => {
     console.log("postApplyForCampaign controller function CALLED!");
     console.log("Request Body:", req.body);
-
     try {
         const { title, description, details, category, goalAmount, endDate } = req.body;
-        const createdBy = req.user._id; // Get member's user ID from auth middleware
-
+        const createdBy = req.user._id;
+        if (!title || !description || !category || !goalAmount || !endDate) {
+            return res.status(400).json({ message: 'Missing required fields (Title, Description, Category, Goal Amount, End Date)' });
+        }
         const newCampaign = new Campaign({
             title,
             description,
@@ -195,18 +196,17 @@ exports.postApplyForCampaign = async (req, res) => {
             category,
             goalAmount,
             endDate,
-            createdBy: createdBy, // Set createdBy to the member's ID
-            status: 'pending_approval' // Default status for member applications
-            // trackingNumber will be auto-generated or assigned by admin later, so no need to set it here
+            createdBy: createdBy,
+            status: 'pending_approval'
         });
-
-        console.log("New Campaign Application Object (before save):", newCampaign);
-
         const savedCampaign = await newCampaign.save();
-
         console.log("Campaign application saved successfully:", savedCampaign);
+        // Remove trackingNumber from response
+        const responseCampaign = savedCampaign.toObject();
+        delete responseCampaign.trackingNumber; // Explicitly remove if needed, though it shouldn't exist
+        // delete responseCampaign.__v;
 
-        res.status(201).json({ message: 'Campaign application submitted successfully', campaign: savedCampaign });
+        res.status(201).json({ message: 'Campaign application submitted successfully', campaign: responseCampaign });
     } catch (error) {
         console.error("Error in campaign application submission:", error);
         res.status(400).json({ message: 'Campaign application failed', error: error.message });

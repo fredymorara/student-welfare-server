@@ -61,7 +61,7 @@ exports.createContribution = async (req, res) => {
         // Populate contribution details
         const populatedContribution = await Contribution.findById(contribution._id)
             .populate('contributor', 'fullName email')
-            .populate('campaign', 'title trackingNumber');
+            .populate('campaign', 'title');
 
         res.status(201).json({
             success: true,
@@ -89,7 +89,7 @@ exports.getAllContributions = async (req, res) => {
 
         const contributions = await Contribution.find(filter)
             .populate('contributor', 'fullName email')
-            .populate('campaign', 'title trackingNumber')
+            .populate('campaign', 'title')
             .limit(limit * 1)
             .skip((page - 1) * limit)
             .sort({ paymentDate: -1 });
@@ -119,7 +119,7 @@ exports.getContributionById = async (req, res) => {
     try {
         const contribution = await Contribution.findById(req.params.id)
             .populate('contributor', 'fullName email')
-            .populate('campaign', 'title trackingNumber');
+            .populate('campaign', 'title');
 
         if (!contribution) {
             return res.status(404).json({

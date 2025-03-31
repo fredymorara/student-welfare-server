@@ -7,6 +7,7 @@ const User = require('./models/user.model');
 const Contribution = require('./models/contribution.model'); // Import Contribution model!
 const connectDB = require('./config/db.config');
 
+
 // Realistic Campaign Data
 const realisticCampaignTitles = [
     "Emergency Medical Appeal for John Doe",
@@ -49,27 +50,26 @@ const realisticCampaignDetails = [
 
 
 const categories = ['Medical', 'Academic', 'Emergency', 'Emergency', 'Medical', 'Other', 'Other', 'Other', 'Other', 'Other'];
-// const statusOptions = ['active', 'active', 'active', 'pending_approval', 'ended', 'rejected']; // Removed varied statuses
+
 const campaignsData = [];
 
-for (let i = 0; i < 20; i++) { // Loop 20 times for 20 campaigns
+for (let i = 0; i < 20; i++) {
+
     campaignsData.push({
-        title: realisticCampaignTitles[i % realisticCampaignTitles.length], // Cycle through titles
-        description: realisticCampaignDescriptions[i % realisticCampaignDescriptions.length], // Cycle through descriptions
-        details: realisticCampaignDetails[i % realisticCampaignDetails.length], // Cycle through details
-        category: categories[i % categories.length], // Cycle through categories
+        title: realisticCampaignTitles[i % realisticCampaignTitles.length],
+        description: realisticCampaignDescriptions[i % realisticCampaignDescriptions.length],
+        details: realisticCampaignDetails[i % realisticCampaignDetails.length],
+        category: categories[i % categories.length],
         goalAmount: Math.floor(Math.random() * 500000) + 100000,
-        currentAmount: 0,
+        currentAmount: 0, // Will be updated later if contributions are added
         endDate: new Date(
-            2024,
+            2024 + Math.floor(i / 12), // Spread end dates over a couple of years maybe
             Math.floor(Math.random() * 12),
             Math.floor(Math.random() * 28 + 1)
         ),
-        status: 'pending_approval', // Set status to pending_approval for all
-        trackingNumber: `CMP-SEED-${(i + 1).toString().padStart(3, '0')}`, // Corrected tracking number sequence
-    });
+        status: 'pending_approval', // Or 'active' if you want some seeded active ones
+        });
 }
-
 
 // Generate 10 Members + 1 Admin (Existing Users WITH History)
 const usersData = [
@@ -119,9 +119,7 @@ const importData = async () => {
         await connectDB();
         await Campaign.deleteMany();
         await User.deleteMany();
-        await Contribution.deleteMany(); // Make sure to clear contributions as well
-
-        const insertedCampaigns = await Campaign.insertMany(campaignsData);
+        await Contribution.deleteMany();
 
         // Hash and insert existing users WITH history and get their IDs
         const insertedUsersWithHistory = await Promise.all(usersData.map(async (user) => {
@@ -129,32 +127,47 @@ const importData = async () => {
             return { ...user, password: hashedPassword };
         }));
         const userDocsWithHistory = await User.insertMany(insertedUsersWithHistory);
+        const adminUser = userDocsWithHistory.find(u => u.role === 'admin');
 
+        // Assign createdBy to campaigns (optional, can assign admin or leave null)
+        // Note: This requires saving individually if you want the pre-save hook to run,
+        // but since we generate trackingNumber above, insertMany is fine.
+        // If you need other hooks, you'd refactor this.
+        // campaignsData.forEach(c => c.createdBy = adminUser?._id); // Example: Assign admin as creator
 
-        // Create contributions AFTER inserting users, so we have user IDs
-        for (let userIndex = 0; userIndex < usersData.length; userIndex++) {
-            if (usersData[userIndex].role === 'member') {
-                const memberUser = userDocsWithHistory[userIndex]; // Get the inserted user document
-                const contributionCount = Math.floor(Math.random() * 5) + 1;
-                for (let i = 0; i < contributionCount; i++) {
-                    const campaign = insertedCampaigns[Math.floor(Math.random() * insertedCampaigns.length)]; // Use insertedCampaigns.length
-                    const amount = Math.floor(Math.random() * 15000) + 500;
+        const insertedCampaigns = await Campaign.insertMany(campaignsData);
 
-                    const contribution = new Contribution({
-                        amount,
-                        campaign: campaign._id,
-                        contributor: memberUser._id, // CORRECT: Set contributor ID here directly!
-                        paymentMethod: 'M-Pesa',
-                        transactionId: `SEED-TXN-${campaign._id}-${Date.now()}-${i}`,
-                        status: 'completed',
-                        mpesaCode: `MPESA-${Date.now()}-${i}`
-                    });
-                    await contribution.save();
-                    campaign.currentAmount += amount;
-                    await campaign.save();
-                }
+        // --- Create contributions (Ensure this logic runs AFTER campaigns are inserted) ---
+        const memberUsers = userDocsWithHistory.filter(u => u.role === 'member');
+        for (const memberUser of memberUsers) {
+            const contributionCount = Math.floor(Math.random() * 5); // 0 to 4 contributions
+            for (let i = 0; i < contributionCount; i++) {
+                // Pick a random *inserted* campaign
+                const campaign = insertedCampaigns[Math.floor(Math.random() * insertedCampaigns.length)];
+                const amount = Math.floor(Math.random() * 15000) + 500;
+
+                // Create unique transactionId for contribution seeder
+                const contributionTxnId = `SEED-TXN-${memberUser._id}-${campaign._id}-${Date.now()}-${i}`;
+
+                const contribution = new Contribution({
+                    amount,
+                    campaign: campaign._id,
+                    contributor: memberUser._id,
+                    paymentMethod: 'M-Pesa', // Seeded contributions are marked as M-Pesa
+                    transactionId: contributionTxnId,
+                    status: 'completed', // Assume seeded contributions are completed
+                    mpesaCode: `MPSEED${Date.now()}${i}`, // Generate fake M-Pesa code
+                    paymentDate: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) // Random date in last 30 days
+                });
+                await contribution.save();
+
+                // Update the campaign's currentAmount - Fetch and save to ensure atomicity isn't strictly needed here
+                // but direct update is slightly risky if multiple things modified it concurrently.
+                // For seeding, direct update is usually fine.
+                await Campaign.updateOne({ _id: campaign._id }, { $inc: { currentAmount: amount } });
             }
         }
+        // ----------------------------------------------------------------------------------
 
 
         // Hash and insert NEW users WITHOUT history
@@ -165,10 +178,11 @@ const importData = async () => {
         await User.insertMany(hashedNewUsers);
 
 
-        await Promise.all(insertedCampaigns.map(campaign => campaign.save()));
+        // No need to save campaigns again unless contributions modified them in-memory
+        // The updateOne above handles currentAmount
 
 
-        console.log('Data Imported with Realistic Campaigns set to Pending Approval and New Users!');
+        console.log('Data Imported with New Users!');
         process.exit();
     } catch (error) {
         console.error('Error with data import:', error);

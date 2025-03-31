@@ -118,32 +118,25 @@ exports.postEndCampaign = async (req, res) => {
 
 exports.postCreateCampaign = async (req, res) => {
     console.log("postCreateCampaign controller function CALLED!");
-
     try {
-        // Destructure required fields
-        const { title, description, category, goalAmount, endDate } = req.body;
-
-        // Validate required fields
+        const { title, description, category, goalAmount, endDate, details } = req.body;
         if (!title || !description || !category || !goalAmount || !endDate) {
-            return res.status(400).json({ message: 'Missing required fields' });
+            return res.status(400).json({ message: 'Missing required fields (Title, Description, Category, Goal Amount, End Date)' });
         }
-
-        // Create campaign with admin user reference
         const newCampaign = new Campaign({
             title,
             description,
+            details,
             category,
             goalAmount,
             endDate,
-            createdBy: req.user._id, // Add admin user reference
-            status: 'active' // Default status for admin-created campaigns
+            createdBy: req.user._id,
+            status: 'active'
         });
-
         const savedCampaign = await newCampaign.save();
-
         res.status(201).json({
             message: 'Campaign created successfully',
-            campaign: {
+            campaign: { // Remove trackingNumber from response
                 _id: savedCampaign._id,
                 title: savedCampaign.title,
                 status: savedCampaign.status,
@@ -151,7 +144,6 @@ exports.postCreateCampaign = async (req, res) => {
                 endDate: savedCampaign.endDate
             }
         });
-
     } catch (error) {
         console.error("Campaign creation error:", error);
         res.status(400).json({
@@ -426,38 +418,28 @@ exports.getGeneralContributionsReport = async (req, res) => {
     try {
         const { startDate, endDate, format } = req.query;
         console.log("Generating General Contributions Report...", { startDate, endDate, format });
-
         let filter = {};
         if (startDate && endDate) {
-            filter.paymentDate = {
-                $gte: new Date(startDate),
-                $lte: new Date(endDate),
-            };
+            filter.paymentDate = { $gte: new Date(startDate), $lte: new Date(endDate) };
         }
-
+        // Update populate: Remove trackingNumber
         const contributions = await Contribution.find(filter)
             .populate('contributor', 'fullName email admissionNumber')
-            .populate('campaign', 'title trackingNumber');
+            .populate('campaign', 'title'); // <-- REMOVED trackingNumber
 
         if (format === 'csv') {
-            if (contributions.length === 0) {
-                return res.status(200).send("No contributions to report."); // Or handle empty report differently
-            }
-            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title', 'campaign.trackingNumber']; // Define fields for CSV
+            if (contributions.length === 0) return res.status(200).send("No contributions to report.");
+            // Update csvFields: Remove campaign.trackingNumber
+            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title']; // <-- REMOVED campaign.trackingNumber
             const csvOptions = { fields: csvFields };
             const csvData = parse(contributions, csvOptions);
-
             res.header('Content-Type', 'text/csv');
             res.attachment('general-contributions-report.csv');
             return res.send(csvData);
-        } else if (format === 'pdf') {
-            // For PDF generation, you'd typically use a library like 'pdfmake' or 'html-pdf-node'
-            // This is more complex and beyond the scope of this step. For now, just return JSON or CSV.
-            return res.status(400).json({ message: 'PDF format not yet implemented for general report.' });
-        } else {
-            return res.status(400).json({ message: 'Invalid report format requested.' });
+        } // ... rest of the function
+        else {
+            return res.status(400).json({ message: 'Invalid or unsupported report format requested.' });
         }
-
     } catch (error) {
         console.error("Error generating general contributions report:", error);
         res.status(500).json({ message: 'Error generating general contributions report', error: error.message });
@@ -468,40 +450,29 @@ exports.getCampaignSpecificReport = async (req, res) => {
     try {
         const { campaignId, startDate, endDate, format } = req.query;
         console.log("Generating Campaign Specific Report...", { campaignId, startDate, endDate, format });
-
-        if (!campaignId) {
-            return res.status(400).json({ message: 'Campaign ID is required for campaign-specific report.' });
-        }
-
-        let filter = { campaign: campaignId }; // Filter by campaignId
+        if (!campaignId) return res.status(400).json({ message: 'Campaign ID is required.' });
+        let filter = { campaign: campaignId };
         if (startDate && endDate) {
-            filter.paymentDate = {
-                $gte: new Date(startDate),
-                $lte: new Date(endDate),
-            };
+            filter.paymentDate = { $gte: new Date(startDate), $lte: new Date(endDate) };
         }
-
+        // Update populate: Remove trackingNumber
         const contributions = await Contribution.find(filter)
             .populate('contributor', 'fullName email admissionNumber')
-            .populate('campaign', 'title trackingNumber');
+            .populate('campaign', 'title'); // <-- REMOVED trackingNumber
 
         if (format === 'csv') {
-            if (contributions.length === 0) {
-                return res.status(200).send("No contributions for this campaign to report.");
-            }
-            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title', 'campaign.trackingNumber'];
+            if (contributions.length === 0) return res.status(200).send("No contributions for this campaign to report.");
+            // Update csvFields: Remove campaign.trackingNumber
+            const csvFields = ['paymentDate', 'amount', 'paymentMethod', 'status', 'contributor.fullName', 'contributor.email', 'contributor.admissionNumber', 'campaign.title']; // <-- REMOVED campaign.trackingNumber
             const csvOptions = { fields: csvFields };
             const csvData = parse(contributions, csvOptions);
-
             res.header('Content-Type', 'text/csv');
             res.attachment(`campaign-${campaignId}-report.csv`);
             return res.send(csvData);
-        } else if (format === 'pdf') {
-            return res.status(400).json({ message: 'PDF format not yet implemented for campaign-specific report.' });
-        } else {
-            return res.status(400).json({ message: 'Invalid report format requested.' });
+        } // ... rest of the function
+        else {
+            return res.status(400).json({ message: 'Invalid or unsupported report format requested.' });
         }
-
     } catch (error) {
         console.error("Error generating campaign-specific report:", error);
         res.status(500).json({ message: 'Error generating campaign-specific report', error: error.message });
