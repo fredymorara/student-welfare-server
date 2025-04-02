@@ -641,7 +641,7 @@ exports.initiateDisbursement = async (req, res) => {
         campaign.disbursementMpesaReceipt = null;
 
 
-        // You *could* deduct the amount from currentAmount here, but it might be safer
+        
         // to wait for the 'completed' callback to be absolutely sure. Let's wait.
         // campaign.currentAmount -= Number(amount); // Decide if you want to deduct now or on success callback
 
