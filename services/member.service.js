@@ -62,7 +62,7 @@ const getMyRecentActivity = async (userId) => {
 };
 
 const getMemberProfile = async (userId) => {
-    const profile = await User.findById(userId).select('-password');
+    const profile = await User.findById(userId).select('-password -__v -verificationToken');
     if (!profile) throw new ApiError(404, 'Member profile not found');
     return profile;
 };
@@ -94,7 +94,7 @@ const updateMemberProfile = async (userId, fullName) => {
         userId,
         { fullName },
         { new: true, runValidators: true }
-    ).select('-password');
+    ).select('-password -__v -verificationToken');
 
     if (!updatedUser) throw new ApiError(404, 'User not found');
     return updatedUser;

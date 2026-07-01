@@ -1,9 +1,10 @@
 const express = require('express');
 const authController = require('../controllers/auth.controller');
+const { validate, authSchemas } = require('../middleware/validation.middleware');
 const router = express.Router();
 
-router.post('/register', authController.register);
-router.post('/login', authController.login);
+router.post('/register', authSchemas.register, validate, authController.register);
+router.post('/login', authSchemas.login, validate, authController.login);
 
 router.get('/verify-email/:token', (req, res, next) => {
     const token = req.params.token;

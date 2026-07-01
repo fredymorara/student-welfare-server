@@ -1,4 +1,12 @@
 require('dotenv').config();
+
+// Boot Environment Validation
+const requiredEnvVars = ['NODE_ENV', 'JWT_SECRET', 'MONGO_URI', 'PORT'];
+const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+if (missingVars.length > 0) {
+    console.error(`CRITICAL BOOT ERROR: Missing required environment variables: ${missingVars.join(', ')}`);
+    process.exit(1);
+}
 const cluster = require('cluster');
 const os = require('os');
 const express = require('express');
@@ -36,6 +44,9 @@ if (isClusterEnabled && (cluster.isMaster || cluster.isPrimary)) {
         cluster.fork();
     });
 } else {
+    const hpp = require('hpp');
+    const compression = require('compression');
+    const morgan = require('morgan');
     const app = express();
     const port = process.env.PORT || 5000;
 
@@ -46,10 +57,55 @@ if (isClusterEnabled && (cluster.isMaster || cluster.isPrimary)) {
     connectDB();
 
     // Global Security Middlewares
-    app.use(helmet());
-    app.use(cors());
+    
+    // Strict Helmet configuration with CSP and HSTS
+    app.use(helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "https://kabarakstudentwelfare.netlify.app"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", "data:", "https:"],
+                connectSrc: ["'self'", "https://kabarakstudentwelfare.netlify.app"],
+                fontSrc: ["'self'", "https:", "data:"],
+                objectSrc: ["'none'"],
+                mediaSrc: ["'self'"],
+                frameSrc: ["'none'"],
+            },
+        },
+        hsts: {
+            maxAge: 31536000,
+            includeSubDomains: true,
+            preload: true
+        }
+    }));
+
+    // Strict CORS configuration
+    const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', 'https://kabarakstudentwelfare.netlify.app'];
+    app.use(cors({
+        origin: function(origin, callback) {
+            if (!origin || allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
+        credentials: true
+    }));
+
+    // Compression
+    app.use(compression());
+
+    // HTTP Request Logging
+    app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
+
     app.use(bodyParser.json({ limit: '10kb' }));
+    
+    // Data sanitization against NoSQL query injection
     app.use(mongoSanitize());
+
+    // Prevent HTTP Parameter Pollution
+    app.use(hpp());
 
     // Rate Limiting Middlewares
     const globalLimiter = rateLimit({
@@ -106,4 +162,30 @@ if (isClusterEnabled && (cluster.isMaster || cluster.isPrimary)) {
             process.exit(1);
         });
     });
+
+    // Graceful shutdown
+    const shutdown = () => {
+        logger.info(`Worker ${process.pid} gracefully shutting down...`);
+        server.close(async () => {
+            logger.info(`Worker ${process.pid} closed HTTP server.`);
+            try {
+                const mongoose = require('mongoose');
+                await mongoose.connection.close();
+                logger.info(`Worker ${process.pid} closed MongoDB connection.`);
+                process.exit(0);
+            } catch (err) {
+                logger.error('Error closing MongoDB connection:', err);
+                process.exit(1);
+            }
+        });
+
+        // Force exit if taking too long (e.g., 10 seconds)
+        setTimeout(() => {
+            logger.error('Could not close connections in time, forcefully shutting down');
+            process.exit(1);
+        }, 10000);
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
 }

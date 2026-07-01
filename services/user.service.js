@@ -4,7 +4,7 @@ const ApiError = require('../utils/ApiError');
 
 const getAllUsers = async (page = 1, limit = 10) => {
     const users = await User.find()
-        .select('-password')
+        .select('-password -__v -verificationToken')
         .limit(limit * 1)
         .skip((page - 1) * limit)
         .sort({ createdAt: -1 });
@@ -65,7 +65,7 @@ const extendUserValidity = async (userId, validUntil) => {
 };
 
 const getAdminProfile = async (adminId) => {
-    const adminProfile = await User.findById(adminId).select('-password');
+    const adminProfile = await User.findById(adminId).select('-password -__v -verificationToken');
     if (!adminProfile) throw new ApiError(404, 'Admin profile not found in database.');
     return adminProfile;
 };
